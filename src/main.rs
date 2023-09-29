@@ -1,59 +1,51 @@
-use std::process::exit;
+mod websocket;
 
-use futures_util::stream::SplitSink;
-use futures_util::{stream::SplitStream, SinkExt, StreamExt};
-use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::{Error, Message};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+use crate::websocket::{connect, listener, subscribe};
 
 #[tokio::main]
 async fn main() {
     let (mut sink, reader) = connect().await.unwrap();
-    subscribe(&mut sink).await.unwrap();
-    listener(reader).await;
-}
-
-async fn connect() -> Result<(SplitSink<Socket, Message>, SplitStream<Socket>), Error> {
-    match connect_async("wss://ws.kraken.com").await {
-        Ok((socket, _)) => {
-            println!("Connected to Kraken");
-            let (sink, stream) = socket.split();
-            Ok((sink, stream))
-        }
-        Err(e) => {
-            println!("Failed to connect to Kraken: {}", e);
-            Err(e)
-        }
-    }
-}
-
-async fn subscribe(sink: &mut SplitSink<Socket, Message>) -> Result<(), Error> {
-    let subscription_message = r#"
+    let message = r#"
     {
         "event": "subscribe",
-        "pair": ["XBT/USD", "XBT/EUR"],
+        "pair": ["ETH/USD"],
         "subscription": {
-            "name": "ticker"
+            "name": "book"
         }
     }
     "#;
-
-    // Send the subscription message
-    sink.send(Message::Text(subscription_message.to_string()))
-        .await
+    subscribe(&mut sink, message).await.unwrap();
+    listener(reader, on_message).await;
 }
 
-async fn listener(reader: SplitStream<Socket>) {
-    let read_future = reader.for_each(|message| async {
-        let data = message.unwrap().to_string();
-        println!("{}", data);
-    });
-
-    read_future.await;
+fn on_message(message: String) {
+    println!("{}", message);
 }
 
 fn on_data() {}
 
+fn on_order_filled() {}
+
+fn record_price() {}
+
+fn get_reserve_price() {}
+
+fn get_optimal_spread() {}
+
+fn get_last_price() {}
+
+fn set_last_price() {}
+
+fn get_allocation() {}
+
 fn set_allocation() {}
+
+fn get_bid_size() {}
+
+fn get_ask_size() {}
+
+fn get_dist_to_target() {}
+
+fn get_volatility() {}
+
+fn get_order_depth() {}

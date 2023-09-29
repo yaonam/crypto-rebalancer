@@ -5,7 +5,7 @@ use tokio_tungstenite::tungstenite::{Error, Message};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
-type Callback = fn(String);
+type Callback = Box<dyn Fn(String) + Send + Sync>;
 
 pub async fn connect() -> Result<(SplitSink<Socket, Message>, SplitStream<Socket>), Error> {
     match connect_async("wss://ws.kraken.com").await {

@@ -21,7 +21,7 @@ pub async fn connect() -> Result<(SplitSink<Socket, Message>, SplitStream<Socket
     }
 }
 
-pub async fn subscribe(sink: &mut SplitSink<Socket, Message>, message: &str) -> Result<(), Error> {
+pub async fn send(sink: &mut SplitSink<Socket, Message>, message: &str) -> Result<(), Error> {
     // Send the subscription message
     sink.send(Message::Text(message.to_string())).await
 }

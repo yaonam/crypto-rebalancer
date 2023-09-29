@@ -1,8 +1,10 @@
-use crate::product::Product;
-use crate::websocket::{connect, listener, subscribe};
+use crate::account::Portfolio;
+use crate::product::Market;
+use crate::websocket::{connect, listener, send};
 use serde_json::json;
+use std::sync::{Arc, Mutex};
 
-pub async fn start(pair: String) {
+pub async fn start(pair: String, portfolio: Arc<Mutex<Portfolio>>) {
     let (mut sink, reader) = connect().await.unwrap();
     let message = json!(
     {
@@ -13,7 +15,7 @@ pub async fn start(pair: String) {
         }
     })
     .to_string();
-    subscribe(&mut sink, &message).await.unwrap();
-    let prod = Product::new(pair);
+    send(&mut sink, &message).await.unwrap();
+    let prod = Market::new(pair, portfolio);
     listener(reader, Box::new(move |msg| prod.on_message(msg))).await;
 }

@@ -1,3 +1,4 @@
+use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
 use rebalancer::task;
 use std::sync::{Arc, Mutex};
@@ -5,7 +6,12 @@ use tokio::signal::ctrl_c;
 
 #[tokio::main]
 async fn main() {
-    let signer = Signer::new("".to_string(), "".to_string());
+    dotenv().ok();
+
+    let signer = Signer::new(
+        std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
+        std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
+    );
     let result = signer.sign("".to_string(), "".to_string());
     println!("{}", result);
 

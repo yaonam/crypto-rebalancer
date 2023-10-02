@@ -1,6 +1,7 @@
 use crate::account::Portfolio;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 const BUFFER_SIZE: usize = 100;
 
@@ -27,7 +28,7 @@ impl Market {
         }
     }
 
-    pub fn on_message(&self, message: String) {
+    pub async fn on_message(&self, message: String) {
         println!("{}", message);
     }
 
@@ -37,8 +38,8 @@ impl Market {
 
     fn record_price() {}
 
-    fn get_reserve_price(&self) -> f64 {
-        let q = self.get_target_delta();
+    async fn get_reserve_price(&self) -> f64 {
+        let q = self.get_target_delta().await;
         let s = self.get_last_price();
         let y = self.risk_aversion;
         let o = self.get_volatility();
@@ -62,10 +63,10 @@ impl Market {
 
     fn get_ask_size() {}
 
-    fn get_target_delta(&self) -> f64 {
+    async fn get_target_delta(&self) -> f64 {
         let delta;
         {
-            let portfolio = self.portfolio.lock().unwrap();
+            let portfolio = self.portfolio.lock().await;
             delta = portfolio.get_asset_target_delta(self.pair.clone());
         }
         delta
@@ -75,7 +76,6 @@ impl Market {
     fn get_volatility(&self) -> f64 {
         let mut sum = 0.0;
         let mut count = 0.0;
-        let mut mean = 0.0;
         let mut variance = 0.0;
 
         for price in self.prices.iter() {
@@ -83,7 +83,7 @@ impl Market {
             count += 1.0;
         }
 
-        mean = sum / count;
+        let mean = sum / count;
 
         for price in self.prices.iter() {
             variance += (price - mean).powf(2.0);

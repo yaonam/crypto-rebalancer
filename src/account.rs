@@ -4,20 +4,21 @@ use reqwest::header;
 use serde_urlencoded;
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{str, time};
+use tokio::sync::Mutex;
 
 const BASE_URL: &str = "https://api.kraken.com";
 
 pub struct Portfolio {
     assets: HashMap<String, (f64, f64)>, // (amount, price)
-    signer: Arc<Mutex<Signer>>,
+    pub signer: Arc<Mutex<Signer>>,
 }
 
 impl Portfolio {
     pub async fn new(signer: Arc<Mutex<Signer>>) -> Self {
         println!("Initializing portfolio...");
-        let balances = { signer.lock().unwrap().get_account_balances().await };
+        let balances = { signer.lock().await.get_account_balances().await };
         let mut assets = HashMap::new();
         for (asset, balance) in balances.as_object().unwrap() {
             let amount = balance.as_str().unwrap().parse::<f64>().unwrap();
@@ -76,7 +77,7 @@ pub struct Signer {
 }
 
 impl Signer {
-    pub fn new(key: String, secret: String) -> Self {
+    pub async fn new(key: String, secret: String) -> Self {
         Signer {
             key: key.clone(),
             secret: secret.clone(),

@@ -1,18 +1,21 @@
 use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
 use rebalancer::task;
-use std::sync::{Arc, Mutex};
-use std::vec;
+use std::sync::Arc;
 use tokio::signal::ctrl_c;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
 
-    let signer = Arc::new(Mutex::new(Signer::new(
-        std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
-        std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
-    )));
+    let signer = Arc::new(Mutex::new(
+        Signer::new(
+            std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
+            std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
+        )
+        .await,
+    ));
 
     // {
     //     let signer = signer.lock().unwrap();
@@ -23,17 +26,18 @@ async fn main() {
     //     println!("{:?}", balances);
     // }
 
+    let portfolio = Arc::new(Mutex::new(Portfolio::new(signer.clone()).await));
+
     let pair1 = "ETH/USD".to_string();
     let pair2 = "STORJ/USD".to_string();
 
-    let portfolio = Arc::new(Mutex::new(Portfolio::new(signer.clone()).await));
+    let task1 = task::spawn(pair1, portfolio.clone(), signer.clone()).await;
+    let task2 = task::spawn(pair2, portfolio.clone(), signer.clone()).await;
 
-    // let task1 = tokio::spawn(task::start(pair1, portfolio.clone()));
-    // let task2 = tokio::spawn(task::start(pair2, portfolio.clone()));
-
-    // let _ = tokio::select! {
-    //     _ = task1 => (),
-    //     _ = task2 => (),
-    //     _ = ctrl_c() => (), // Graceful shutdown
-    // };
+    let _ = tokio::select! {
+        _ = task1 => (),
+        _ = task2 => (),
+        _ = ctrl_c() => (), // Graceful shutdown
+    };
+    // let _ = tokio::join!(task1, task2);
 }

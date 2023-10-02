@@ -2,6 +2,7 @@ use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
 use rebalancer::task;
 use std::sync::{Arc, Mutex};
+use std::vec;
 use tokio::signal::ctrl_c;
 
 #[tokio::main]
@@ -12,8 +13,19 @@ async fn main() {
         std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
         std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
     );
-    let result = signer.sign("".to_string(), "".to_string());
-    println!("{}", result);
+
+    let token = signer.get_ws_token().await;
+    println!("{}", token);
+    // let data = vec![
+    //     ("ordertype", "limit"),
+    //     ("pair", "XBTUSD"),
+    //     ("price", "37500"),
+    //     ("type", "buy"),
+    //     ("volume", "1.25"),
+    // ];
+    // let (post_data, sign) = signer.sign(&"/0/private/AddOrder".to_string(), data);
+    // println!("{}", post_data);
+    // println!("{}", sign);
 
     // let pair1 = "ETH/USD".to_string();
     // let pair2 = "STORJ/USD".to_string();

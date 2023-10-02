@@ -9,28 +9,24 @@ use tokio::signal::ctrl_c;
 async fn main() {
     dotenv().ok();
 
-    let signer = Signer::new(
+    let signer = Arc::new(Mutex::new(Signer::new(
         std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
         std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
-    );
+    )));
 
-    let token = signer.get_ws_token().await;
-    println!("{}", token);
-    // let data = vec![
-    //     ("ordertype", "limit"),
-    //     ("pair", "XBTUSD"),
-    //     ("price", "37500"),
-    //     ("type", "buy"),
-    //     ("volume", "1.25"),
-    // ];
-    // let (post_data, sign) = signer.sign(&"/0/private/AddOrder".to_string(), data);
-    // println!("{}", post_data);
-    // println!("{}", sign);
+    // {
+    //     let signer = signer.lock().unwrap();
+    //     let token = signer.get_ws_token().await;
+    //     println!("{}", token);
 
-    // let pair1 = "ETH/USD".to_string();
-    // let pair2 = "STORJ/USD".to_string();
+    //     let balances = signer.get_account_balances().await;
+    //     println!("{:?}", balances);
+    // }
 
-    // let portfolio = Arc::new(Mutex::new(Portfolio::new()));
+    let pair1 = "ETH/USD".to_string();
+    let pair2 = "STORJ/USD".to_string();
+
+    let portfolio = Arc::new(Mutex::new(Portfolio::new(signer.clone()).await));
 
     // let task1 = tokio::spawn(task::start(pair1, portfolio.clone()));
     // let task2 = tokio::spawn(task::start(pair2, portfolio.clone()));

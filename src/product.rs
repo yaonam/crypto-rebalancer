@@ -12,8 +12,8 @@ pub struct Market {
     pair: String,
     last_price: f64,
     prices: VecDeque<f64>,
-    bid_ticket: String,
-    ask_ticket: String,
+    bid_tickets: Vec<String>,
+    ask_tickets: Vec<String>,
     risk_aversion: f64,
     portfolio: Arc<Mutex<Portfolio>>,
 }
@@ -24,26 +24,57 @@ impl Market {
             pair: pair,
             last_price: 0.0,
             prices: VecDeque::with_capacity(BUFFER_SIZE),
-            bid_ticket: String::new(),
-            ask_ticket: String::new(),
+            bid_tickets: Vec::new(),
+            ask_tickets: Vec::new(),
             risk_aversion: 0.0,
             portfolio: portfolio,
         }
     }
 
-    pub async fn on_message(&self, message: String) {
+    pub async fn on_message(&mut self, message: String) {
         let deserialized: Result<WSPayload, serde_json::Error> = serde_json::from_str(&message);
         match deserialized {
             Ok(data) => match data {
                 WSPayload::PublicMessage(pub_msg) => {
                     println!("{:?}", pub_msg);
                 }
-                WSPayload::OpenOrders(orders) => {
-                    println!("Got open orders");
-                }
+                WSPayload::OpenOrders(orders) => self.handle_order_update(orders),
                 _ => {}
             },
             Err(e) => println!("Error: {}", e),
+        }
+    }
+
+    fn handle_order_update(&mut self, orders: OpenOrders) {
+        for order in orders.orders {
+            // Order should be of length 1
+            for (order_id, order_data) in order {
+                if order_data.descr.pair != self.pair {
+                    continue;
+                }
+
+                match order_data.status.as_str() {
+                    "open" => match order_data.descr._type.as_str() {
+                        "buy" => {
+                            if !self.bid_tickets.contains(&order_id) {
+                                self.bid_tickets.push(order_id.clone());
+                            }
+                        }
+                        "sell" => {
+                            if !self.ask_tickets.contains(&order_id) {
+                                self.ask_tickets.push(order_id.clone());
+                            }
+                        }
+                        _ => {
+                            println!("Unhandled order type: {}", order_data.descr._type);
+                        }
+                    },
+                    "closed" => self.bid_tickets.retain(|x| x != &order_id),
+                    _ => {
+                        println!("Unhandled order status: {}", order_data.status);
+                    }
+                }
+            }
         }
     }
 

@@ -1,5 +1,8 @@
 use crate::account::Portfolio;
-use std::collections::VecDeque;
+use crate::messages::{OpenOrders, WSPayload};
+use serde::{Deserialize, Serialize};
+use serde_json;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -29,7 +32,19 @@ impl Market {
     }
 
     pub async fn on_message(&self, message: String) {
-        println!("{}", message);
+        let deserialized: Result<WSPayload, serde_json::Error> = serde_json::from_str(&message);
+        match deserialized {
+            Ok(data) => match data {
+                WSPayload::PublicMessage(pub_msg) => {
+                    println!("{:?}", pub_msg);
+                }
+                WSPayload::OpenOrders(orders) => {
+                    println!("Got open orders");
+                }
+                _ => {}
+            },
+            Err(e) => println!("Error: {}", e),
+        }
     }
 
     fn on_data() {}

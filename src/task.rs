@@ -44,6 +44,6 @@ pub async fn start(pair: String, portfolio: Arc<Mutex<Portfolio>>, token: String
     .to_string();
     send(&mut priv_sink, &message).await.unwrap();
 
-    let market = Arc::new(Mutex::new(Market::new(pair, portfolio)));
+    let market = Arc::new(Mutex::new(Market::new(pair, portfolio, priv_sink, token)));
     listener(pub_reader, priv_reader, market.clone()).await;
 }

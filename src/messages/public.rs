@@ -1,13 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
-struct TickerData {
-    a: Vec<serde_json::Value>,
-    b: Vec<serde_json::Value>,
+pub struct TickerData {
+    pub a: Vec<serde_json::Value>,
+    pub b: Vec<serde_json::Value>,
     c: Vec<serde_json::Value>,
-    v: Vec<serde_json::Value>,
+    pub v: Vec<serde_json::Value>,
     p: Vec<serde_json::Value>,
     t: Vec<serde_json::Value>,
     l: Vec<serde_json::Value>,
@@ -17,14 +16,14 @@ struct TickerData {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
-enum PublicData {
+pub enum PublicData {
     Ticker(TickerData),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PublicMessage {
-    channel_id: i64,
-    data: PublicData,
-    channel_name: String,
-    pair: String,
+    pub channel_id: i64,
+    pub data: PublicData,
+    pub channel_name: String,
+    pub pair: String,
 }

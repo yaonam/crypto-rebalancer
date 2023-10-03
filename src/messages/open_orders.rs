@@ -26,12 +26,12 @@ pub struct OrderData {
     // display_volume_remain: f64,
     // expiretm: f64,
     // Ignore contingent for now
-    pub descr: OrderDataDescr,
-    pub vol: String,
-    pub vol_exec: String,
-    pub cost: String,
-    pub fee: String,
-    pub avg_price: String,
+    pub descr: Option<OrderDataDescr>,
+    pub vol: Option<String>,
+    pub vol_exec: Option<String>,
+    pub cost: Option<String>,
+    pub fee: Option<String>,
+    pub avg_price: Option<String>,
     // ...
 }
 

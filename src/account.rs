@@ -40,14 +40,14 @@ impl Portfolio {
         }
     }
 
-    // value/total - target. In units of base asset (USD).
+    // value/total - target. In percentage.
     pub fn get_asset_target_delta(&self, asset: String) -> f64 {
         let (amount, price) = self.get_asset(asset);
         let total_value = self.get_total_value();
 
         let target = 1.0 / self.assets.len() as f64;
 
-        amount * price / total_value - target
+        (amount * price / total_value - target) * 100.0
     }
 
     fn get_asset_allocation(&self, asset: String) -> f64 {

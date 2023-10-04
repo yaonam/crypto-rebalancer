@@ -15,12 +15,18 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const BUFFER_SIZE: usize = 100;
-const PRICE_RECORD_INTERVAL: u64 = 60; // seconds
-const ORDER_SIZE_USD: f64 = 0.10;
-const RISK_AVERSION: f64 = 0.5;
+const PRICE_RECORD_INTERVAL: u64 = 1; // seconds
+const ORDER_SIZE_USD: f64 = 20.0;
+const RISK_AVERSION: f64 = 10.0;
+
+const DECIMALS: u8 = 99;
 
 pub struct Market {
+    // Constants
     pair: String,
+    decimals: u8,
+
+    // Market data
     last_price: f64,
     prices: VecDeque<f64>,
     prices_last_updated: u64,
@@ -28,9 +34,11 @@ pub struct Market {
     spreads_last_updated: u64,
     vol_24hr: f64,
 
+    // Orders
     bid_orders: HashMap<String, OrderData>,
     ask_orders: HashMap<String, OrderData>,
 
+    // Misc
     portfolio: Arc<Mutex<Portfolio>>,
     priv_sink: SplitSink<Socket, Message>,
     token: String, // Access token
@@ -45,6 +53,7 @@ impl Market {
     ) -> Self {
         Market {
             pair,
+            decimals: DECIMALS,
             last_price: 0.0,
             prices: VecDeque::with_capacity(BUFFER_SIZE),
             prices_last_updated: 0,
@@ -65,25 +74,33 @@ impl Market {
         let deserialized: Result<WSPayload, serde_json::Error> = serde_json::from_str(&message);
         match deserialized {
             Ok(data) => match data {
-                WSPayload::PublicMessage(pub_msg) => {
-                    println!("{:?}", pub_msg);
-                    match pub_msg.data {
-                        PublicData::Ticker(data) => self.on_data(data).await,
-                        _ => {}
+                WSPayload::PublicMessage(pub_msg) => match pub_msg.data {
+                    PublicData::Ticker(data) => self.on_data(data).await,
+                    _ => {
+                        println!("Unhandled public message: {:?}", pub_msg);
                     }
-                }
+                },
                 WSPayload::OpenOrders(orders) => self.handle_order_update(orders).await,
-                _ => {}
+                WSPayload::Heartbeat(_heartbeat) => {}
+                _ => {
+                    println!("Unhandled message: {:?}", data);
+                }
             },
             Err(e) => println!("Error: {}", e),
         }
     }
 
     async fn handle_order_update(&mut self, orders: OpenOrders) {
+        println!("{:?}", orders);
+
         for order in orders.orders {
             for (order_id, order_data) in order {
                 match order_data.status.as_str() {
-                    "open" => {
+                    "pending" | "open" => {
+                        if order_data.descr.is_none() {
+                            println!("Order descr is None");
+                            continue;
+                        }
                         if order_data.descr.as_ref().unwrap().pair != self.pair {
                             continue;
                         }
@@ -128,27 +145,34 @@ impl Market {
     async fn on_data(&mut self, data: TickerData) {
         let bid_price = data.b[0].as_str().unwrap().parse::<f64>().unwrap();
         let ask_price = data.a[0].as_str().unwrap().parse::<f64>().unwrap();
+        self.record_spread(bid_price, ask_price);
 
+        // Initialize
         if self.last_price == 0.0 {
             self.last_price = (bid_price + ask_price) / 2.0;
+            self.decimals = count_decimals(bid_price.to_string().as_str());
         }
         self.record_price();
 
         self.vol_24hr = data.v[0].as_str().unwrap().parse::<f64>().unwrap();
-        self.record_spread(bid_price, ask_price);
 
-        let reserve_price = self.get_reserve_price().await;
-        let bid_price = reserve_price * (1.0 - self.get_optimal_spread());
-        let ask_price = reserve_price * (1.0 + self.get_optimal_spread());
+        if self.bid_orders.is_empty() || self.ask_orders.is_empty() {
+            self.cancel_orders().await;
+            self.create_orders().await;
+        }
 
-        println!("Last price: {}", self.last_price);
-        println!("Reserve price: {}", reserve_price);
+        println!(
+            "Last price: {}, Bid: {}, Ask: {}",
+            self.last_price, bid_price, ask_price
+        );
+        println!("Decimals: {}", self.decimals);
+        println!("Reserve price: {}", self.get_reserve_price().await);
         println!("Optimal spread: {}", self.get_optimal_spread());
-        println!("Bid price: {}", bid_price);
-        println!("Ask price: {}", ask_price);
     }
 
     async fn on_order_filled(&mut self, order: OrderData) {
+        println!("Order filled: {:?}", order);
+
         let descr = &order.descr.unwrap();
         let price = descr.price.parse::<f64>().unwrap();
         self.last_price = price;
@@ -171,6 +195,8 @@ impl Market {
     }
 
     async fn create_orders(&mut self) {
+        println!("Creating orders...");
+
         let reserve_price = self.get_reserve_price().await;
         let bid_price = reserve_price * (1.0 - self.get_optimal_spread());
         let ask_price = reserve_price * (1.0 + self.get_optimal_spread());
@@ -183,13 +209,14 @@ impl Market {
                 "event": "addOrder",
                 "ordertype": "limit",
                 "pair": self.pair,
-                "price": bid_price,
+                "price": self.round_price(bid_price),
                 "token": self.token,
                 "type": "buy",
-                "volume": bid_size,
+                "volume": bid_size.to_string(),
             }
         )
         .to_string();
+        println!("Sending: {}", message);
         send(&mut self.priv_sink, &message).await.unwrap();
 
         let message = json!(
@@ -197,10 +224,10 @@ impl Market {
                 "event": "addOrder",
                 "ordertype": "limit",
                 "pair": self.pair,
-                "price": ask_price,
+                "price": self.round_price(ask_price),
                 "token": self.token,
                 "type": "sell",
-                "volume": ask_size,
+                "volume": ask_size.to_string(),
             }
         )
         .to_string();
@@ -208,26 +235,30 @@ impl Market {
     }
 
     async fn cancel_orders(&mut self) {
+        println!("Cancelling orders...");
+
         let keys: Vec<&str> = self
             .bid_orders
             .keys()
             .chain(self.ask_orders.keys())
             .map(|k| (*k).as_str())
             .collect();
-        let message = json!(
-            {
-                "event": "cancelOrder",
-                "token": self.token,
-                "txid": keys,
-            }
-        )
-        .to_string();
-        send(&mut self.priv_sink, &message).await.unwrap();
+        if !keys.is_empty() {
+            let message = json!(
+                {
+                    "event": "cancelOrder",
+                    "token": self.token,
+                    "txid": keys
+                }
+            )
+            .to_string();
+            println!("{}", message);
+            send(&mut self.priv_sink, &message).await.unwrap();
+        }
     }
 
     /// Records self.last_price if it has been PRICE_RECORD_INTERVAL seconds since the last recording.
     fn record_price(&mut self) {
-        println!("Recording price...");
         let now = time::UNIX_EPOCH.elapsed().unwrap().as_secs();
         if now - self.prices_last_updated >= PRICE_RECORD_INTERVAL {
             self.prices.push_back(self.last_price);
@@ -235,12 +266,13 @@ impl Market {
                 self.prices.pop_front();
             }
             self.prices_last_updated = now;
+
+            println!("Recorded new price: {}", self.last_price);
         }
     }
 
     /// Records the spread if it has been PRICE_RECORD_INTERVAL seconds since the last recording.
     fn record_spread(&mut self, bid_price: f64, ask_price: f64) {
-        println!("Recording spread...");
         let now = time::UNIX_EPOCH.elapsed().unwrap().as_secs();
         if now - self.spreads_last_updated >= PRICE_RECORD_INTERVAL {
             let spread = 2.0 * (ask_price - bid_price) / (ask_price + bid_price);
@@ -249,6 +281,8 @@ impl Market {
                 self.spreads.pop_front();
             }
             self.spreads_last_updated = now;
+
+            println!("Recorded new spread: {}", spread);
         }
     }
 
@@ -266,7 +300,7 @@ impl Market {
         let o = self.get_volatility();
         let k = self.get_order_depth();
 
-        y * o.powf(2.0) + (1.0 + y / k).ln()
+        y * o.powf(2.0) + (1.0 + y / k).ln() + 0.01
     }
 
     fn get_last_price(&self) -> f64 {
@@ -281,13 +315,10 @@ impl Market {
         ORDER_SIZE_USD / self.get_last_price()
     }
 
+    /// Returns the target delta for the asset. In percentage.
     async fn get_target_delta(&self) -> f64 {
-        let delta;
-        {
-            let portfolio = self.portfolio.lock().await;
-            delta = portfolio.get_asset_target_delta(self.pair.clone());
-        }
-        delta
+        let portfolio = self.portfolio.lock().await;
+        portfolio.get_asset_target_delta(self.pair.clone())
     }
 
     // Returns the standard deviation of the last 100 prices
@@ -309,10 +340,26 @@ impl Market {
 
         variance /= count;
 
-        variance.sqrt()
+        variance.sqrt() / self.last_price // Normalize by the last price
     }
 
+    /// Returns an estimation of the liquidity.
+    /// sqrt(vol_24hr*avg_spread)
     fn get_order_depth(&self) -> f64 {
-        1.0
+        (self.vol_24hr * self.spreads.len() as f64 / self.spreads.iter().sum::<f64>()).sqrt()
+    }
+
+    fn round_price(&self, price: f64) -> String {
+        let factor = 10.0_f64.powi(self.decimals as i32);
+        ((price * factor).round() / factor).to_string()
+    }
+}
+
+fn count_decimals(s: &str) -> u8 {
+    println!("Counting decimals for {}", s);
+    if let Some(pos) = s.find('.') {
+        s[pos + 1..].len() as u8
+    } else {
+        0
     }
 }

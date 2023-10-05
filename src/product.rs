@@ -1,5 +1,5 @@
 use crate::account::Portfolio;
-use crate::messages::{OpenOrders, OrderData, PublicData, PublicMessage, TickerData, WSPayload};
+use crate::messages::{OpenOrders, OrderData, PublicData, TickerData, WSPayload};
 use crate::websocket::send;
 use futures_util::stream::SplitSink;
 use serde_json;
@@ -14,10 +14,12 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-const BUFFER_SIZE: usize = 100;
-const PRICE_RECORD_INTERVAL: u64 = 1; // seconds
+const BUFFER_SIZE: usize = 100; // Number of prices/spreads to keep in memory
+const PRICE_RECORD_INTERVAL: u64 = 60; // seconds
 const ORDER_SIZE_USD: f64 = 20.0;
 const RISK_AVERSION: f64 = 10.0;
+const MAKER_FEE: f64 = 0.0014;
+const UPDATE_PRICE_THRESHOLD: f64 = 0.0001;
 
 const DECIMALS: u8 = 99;
 
@@ -77,28 +79,27 @@ impl Market {
                 WSPayload::PublicMessage(pub_msg) => match pub_msg.data {
                     PublicData::Ticker(data) => self.on_data(data).await,
                     _ => {
-                        println!("Unhandled public message: {:?}", pub_msg);
+                        println!("[{}] Unhandled public message: {:?}", self.pair, pub_msg);
                     }
                 },
                 WSPayload::OpenOrders(orders) => self.handle_order_update(orders).await,
                 WSPayload::Heartbeat(_heartbeat) => {}
                 _ => {
-                    println!("Unhandled message: {:?}", data);
+                    println!("[{}] Unhandled message: {:?}", self.pair, data);
                 }
             },
-            Err(e) => println!("Error: {}", e),
+            Err(e) => println!("[{}] Error: {}", self.pair, e),
         }
     }
 
     async fn handle_order_update(&mut self, orders: OpenOrders) {
-        println!("{:?}", orders);
-
         for order in orders.orders {
             for (order_id, order_data) in order {
                 match order_data.status.as_str() {
                     "pending" | "open" => {
+                        println!("[{}] Order {}: {}", self.pair, order_data.status, order_id);
                         if order_data.descr.is_none() {
-                            println!("Order descr is None");
+                            println!("[{}] Order descr is None", self.pair);
                             continue;
                         }
                         if order_data.descr.as_ref().unwrap().pair != self.pair {
@@ -117,13 +118,15 @@ impl Market {
                             }
                             _ => {
                                 println!(
-                                    "Unhandled order type: {}",
+                                    "[{}] Unhandled order type: {}",
+                                    self.pair,
                                     order_data.descr.as_ref().unwrap()._type
                                 );
                             }
                         }
                     }
                     "closed" => {
+                        println!("[{}] Order filled: {}", self.pair, order_id);
                         if let Some(order) = self.bid_orders.remove(&order_id) {
                             self.on_order_filled(order).await;
                         } else if let Some(order) = self.ask_orders.remove(&order_id) {
@@ -131,11 +134,15 @@ impl Market {
                         }
                     }
                     "canceled" => {
+                        println!("[{}] Order cancelled: {}", self.pair, order_id);
                         self.bid_orders.remove(&order_id);
                         self.ask_orders.remove(&order_id);
                     }
                     _ => {
-                        println!("Unhandled order status: {}", order_data.status);
+                        println!(
+                            "[{}] Unhandled order status: {}",
+                            self.pair, order_data.status
+                        );
                     }
                 }
             }
@@ -148,30 +155,33 @@ impl Market {
         self.record_spread(bid_price, ask_price);
 
         // Initialize
+        let decimals = count_decimals(&bid_price.to_string());
         if self.last_price == 0.0 {
             self.last_price = (bid_price + ask_price) / 2.0;
-            self.decimals = count_decimals(bid_price.to_string().as_str());
+            self.decimals = decimals;
+        } else if decimals > self.decimals {
+            self.decimals = decimals; // In case prev count had trailing zeros
         }
         self.record_price();
 
         self.vol_24hr = data.v[0].as_str().unwrap().parse::<f64>().unwrap();
 
-        if self.bid_orders.is_empty() || self.ask_orders.is_empty() {
+        if self.bid_orders.is_empty() && self.ask_orders.is_empty() {
             self.cancel_orders().await;
-            self.create_orders().await;
+            // self.create_orders().await;
         }
 
+        let (reserve_price, optimal_spread) = self.get_ans_params().await;
         println!(
             "Last price: {}, Bid: {}, Ask: {}",
             self.last_price, bid_price, ask_price
         );
-        println!("Decimals: {}", self.decimals);
-        println!("Reserve price: {}", self.get_reserve_price().await);
-        println!("Optimal spread: {}", self.get_optimal_spread());
+        println!("Reserve price: {}", reserve_price);
+        println!("Optimal spread: {}", optimal_spread);
     }
 
     async fn on_order_filled(&mut self, order: OrderData) {
-        println!("Order filled: {:?}", order);
+        println!("[{}] Order filled: {:?}", self.pair, order);
 
         let descr = &order.descr.unwrap();
         let price = descr.price.parse::<f64>().unwrap();
@@ -195,47 +205,50 @@ impl Market {
     }
 
     async fn create_orders(&mut self) {
-        println!("Creating orders...");
+        println!("[{}] Creating orders...", self.pair);
 
-        let reserve_price = self.get_reserve_price().await;
-        let bid_price = reserve_price * (1.0 - self.get_optimal_spread());
-        let ask_price = reserve_price * (1.0 + self.get_optimal_spread());
+        let (reserve_price, optimal_spread) = self.get_ans_params().await;
+        let bid_price = reserve_price * (1.0 - optimal_spread);
+        let ask_price = reserve_price * (1.0 + optimal_spread);
 
         let bid_size = self.get_bid_size();
         let ask_size = self.get_ask_size();
 
-        let message = json!(
-            {
-                "event": "addOrder",
-                "ordertype": "limit",
-                "pair": self.pair,
-                "price": self.round_price(bid_price),
-                "token": self.token,
-                "type": "buy",
-                "volume": bid_size.to_string(),
-            }
-        )
-        .to_string();
-        println!("Sending: {}", message);
-        send(&mut self.priv_sink, &message).await.unwrap();
+        if !Market::similar_order_exists("buy", bid_price, &self.bid_orders) {
+            let message = json!(
+                {
+                    "event": "addOrder",
+                    "ordertype": "limit",
+                    "pair": self.pair,
+                    "price": self.round_price(bid_price),
+                    "token": self.token,
+                    "type": "buy",
+                    "volume": bid_size.to_string(),
+                }
+            )
+            .to_string();
+            send(&mut self.priv_sink, &message).await.unwrap();
+        }
 
-        let message = json!(
-            {
-                "event": "addOrder",
-                "ordertype": "limit",
-                "pair": self.pair,
-                "price": self.round_price(ask_price),
-                "token": self.token,
-                "type": "sell",
-                "volume": ask_size.to_string(),
-            }
-        )
-        .to_string();
-        send(&mut self.priv_sink, &message).await.unwrap();
+        if !Market::similar_order_exists("sell", ask_price, &self.ask_orders) {
+            let message = json!(
+                {
+                    "event": "addOrder",
+                    "ordertype": "limit",
+                    "pair": self.pair,
+                    "price": self.round_price(ask_price),
+                    "token": self.token,
+                    "type": "sell",
+                    "volume": ask_size.to_string(),
+                }
+            )
+            .to_string();
+            send(&mut self.priv_sink, &message).await.unwrap();
+        }
     }
 
     async fn cancel_orders(&mut self) {
-        println!("Cancelling orders...");
+        println!("[{}] Cancelling orders...", self.pair);
 
         let keys: Vec<&str> = self
             .bid_orders
@@ -267,7 +280,7 @@ impl Market {
             }
             self.prices_last_updated = now;
 
-            println!("Recorded new price: {}", self.last_price);
+            println!("[{}] Recorded new price: {}", self.pair, self.last_price);
         }
     }
 
@@ -282,8 +295,15 @@ impl Market {
             }
             self.spreads_last_updated = now;
 
-            println!("Recorded new spread: {}", spread);
+            println!("[{}] Recorded new spread: {}", self.pair, spread);
         }
+    }
+
+    async fn get_ans_params(&mut self) -> (f64, f64) {
+        let reserve_price = self.get_reserve_price().await;
+        let optimal_spread = self.get_optimal_spread(reserve_price);
+
+        (reserve_price, optimal_spread)
     }
 
     async fn get_reserve_price(&self) -> f64 {
@@ -292,15 +312,21 @@ impl Market {
         let y = RISK_AVERSION;
         let o = self.get_volatility();
 
-        s + q * y * o.powf(2.0)
+        s * (1.0 + 50.0 * q * y * o.powf(2.0))
     }
 
-    fn get_optimal_spread(&mut self) -> f64 {
+    fn get_optimal_spread(&mut self, reserve_price: f64) -> f64 {
         let y = RISK_AVERSION;
         let o = self.get_volatility();
         let k = self.get_order_depth();
 
-        y * o.powf(2.0) + (1.0 + y / k).ln() + 0.01
+        let mut spread = y * o.powf(2.0) + (1.0 + y / k).ln();
+
+        if spread < MAKER_FEE {
+            spread = MAKER_FEE;
+        }
+
+        spread + 2.0 * (reserve_price / self.last_price - 1.0).abs()
     }
 
     fn get_last_price(&self) -> f64 {
@@ -346,12 +372,26 @@ impl Market {
     /// Returns an estimation of the liquidity.
     /// sqrt(vol_24hr*avg_spread)
     fn get_order_depth(&self) -> f64 {
-        (self.vol_24hr * self.spreads.len() as f64 / self.spreads.iter().sum::<f64>()).sqrt()
+        (self.vol_24hr * self.last_price).ln()
     }
 
     fn round_price(&self, price: f64) -> String {
         let factor = 10.0_f64.powi(self.decimals as i32);
         ((price * factor).round() / factor).to_string()
+    }
+
+    fn similar_order_exists(_type: &str, price: f64, orders: &HashMap<String, OrderData>) -> bool {
+        for (_, order) in orders {
+            if order.descr.is_none() {
+                continue;
+            }
+            let order_price = order.descr.as_ref().unwrap().price.parse::<f64>().unwrap();
+
+            if (1.0 - order_price / price).abs() < UPDATE_PRICE_THRESHOLD {
+                return true;
+            }
+        }
+        false
     }
 }
 

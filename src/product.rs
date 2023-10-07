@@ -83,7 +83,7 @@ impl Market {
                     }
                 },
                 WSPayload::OpenOrders(orders) => self.handle_order_update(orders).await,
-                WSPayload::Heartbeat(_heartbeat) => {}
+                WSPayload::Heartbeat(_heartbeat) => self.record_price(),
                 _ => {
                     println!("[{}] Unhandled message: {:?}", self.pair, data);
                 }
@@ -168,7 +168,7 @@ impl Market {
 
         if self.bid_orders.is_empty() && self.ask_orders.is_empty() {
             self.cancel_orders().await;
-            // self.create_orders().await;
+            self.create_orders().await;
         }
 
         let (reserve_price, optimal_spread) = self.get_ans_params().await;
@@ -208,8 +208,8 @@ impl Market {
         println!("[{}] Creating orders...", self.pair);
 
         let (reserve_price, optimal_spread) = self.get_ans_params().await;
-        let bid_price = reserve_price * (1.0 - optimal_spread);
-        let ask_price = reserve_price * (1.0 + optimal_spread);
+        let bid_price = reserve_price * (1.0 - optimal_spread / 2.0);
+        let ask_price = reserve_price * (1.0 + optimal_spread / 2.0);
 
         let bid_size = self.get_bid_size();
         let ask_size = self.get_ask_size();
@@ -312,7 +312,7 @@ impl Market {
         let y = RISK_AVERSION;
         let o = self.get_volatility();
 
-        s * (1.0 + 50.0 * q * y * o.powf(2.0))
+        s * (1.0 + 10.0 * (q / q.abs().sqrt()) * y * o.powf(2.0))
     }
 
     fn get_optimal_spread(&mut self, reserve_price: f64) -> f64 {
@@ -320,11 +320,13 @@ impl Market {
         let o = self.get_volatility();
         let k = self.get_order_depth();
 
-        let mut spread = y * o.powf(2.0) + (1.0 + y / k).ln();
+        let mut spread = y * o.powf(2.0) + (1.0 + y / k).ln() / 2000.0;
 
         if spread < MAKER_FEE {
             spread = MAKER_FEE;
         }
+
+        println!("Spread: {}, Volatility: {}, Order depth: {}", spread, o, k);
 
         spread + 2.0 * (reserve_price / self.last_price - 1.0).abs()
     }

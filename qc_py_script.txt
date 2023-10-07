@@ -1,0 +1,228 @@
+# region imports
+import statistics
+import warnings
+
+from AlgorithmImports import *
+
+# endregion
+
+warnings.filterwarnings("ignore")
+
+class Market:
+    
+    def __init__(self, **kwargs):
+        self.last_price = kwargs.get("last_price", None)
+        self.prices = [] # For tracking historical prices
+        self.prices_long = []
+        self.prices_long_i = 0
+
+        self.bid_spread = kwargs.get("bid_spread", None)
+        self.ask_spread = kwargs.get("ask_spread", None)
+
+        self.bid_size = kwargs.get("bid_size", None)
+        self.ask_size = kwargs.get("ask_size", None)
+
+        self.bid_ticket: OrderTicket = kwargs.get("bid_ticket", None)
+        self.ask_ticket: OrderTicket = kwargs.get("ask_ticket", None)
+
+        self.trade_bar = kwargs.get("trade_bar", None)
+
+class MMRebalancer(QCAlgorithm):
+
+    def Initialize(self):
+        self.SetStartDate(2022, 9, 1)
+        self.SetEndDate(2023, 9, 1)
+        # self.SetStartDate(2023, 7, 13)
+        # self.SetEndDate(2023, 7, 13)
+        cash = self.GetParameter("cash", 10000)
+        self.SetCash(cash)
+        self.SetBrokerageModel(BrokerageName.Kraken, AccountType.Cash)
+
+        self.symbols = self.GetParameter("symbols").split(",")
+        self.markets = {}
+        for symbol in self.symbols:
+            self.AddCrypto(symbol, Resolution.Minute).Symbol
+            self.markets[symbol] = Market()
+
+        self.cash_buffer = cash*self.GetParameter("cash_buffer_ratio", 0.1)
+        self.target_alloc = 1/len(self.symbols)
+
+    def OnData(self, data: Slice):
+        # self.cancel_orders()
+
+        if not self.Portfolio.Invested:
+            tickets = set()
+            for symbol in self.symbols:
+                # Setup initial balances
+                ticket = self.set_crypto_holdings(symbol, self.target_alloc)
+                if ticket: tickets.add(ticket)
+
+            self.wait_till_all_filled(tickets)
+
+            for symbol in self.symbols:
+                # Create orders
+                self.create_orders(symbol)
+
+        for symbol in self.symbols:
+            market = self.markets[symbol]
+            self.record_price(symbol, market.last_price)
+            if market.prices_long_i % 10 == 0:
+                self.cancel_orders(symbol)
+                self.create_orders(symbol)
+
+    def OnOrderEvent(self, orderEvent):
+        if orderEvent.Status == OrderStatus.Filled:
+            order = self.Transactions.GetOrderById(orderEvent.OrderId)
+            symbol = order.Symbol.Value
+            self.cancel_orders(symbol)
+            self.set_last_price(symbol, self.get_reserve_price_delta(symbol, order.Price))
+            self.create_orders(symbol)
+
+    def print_alloc(self, symbol):
+        self.Debug(f"{symbol}: {self.get_allocation(symbol)}")
+
+    def record_price(self, symbol, price):
+        market = self.markets[symbol]
+        if len(market.prices) > 29: market.prices = market.prices[1:] # Slice out first element
+        market.prices.append(price) # Append new element
+
+        if market.prices_long_i < 1:
+            market.prices_long_i = 60
+            if (len(market.prices_long)) > 24: market.prices_long = market.prices_long[1:]
+            market.prices_long.append(price)
+        else:
+            market.prices_long_i -= 1
+
+    def cancel_orders(self, symbol):
+        market = self.markets[symbol]
+        if market.bid_ticket and market.bid_ticket.Status != OrderStatus.Filled: market.bid_ticket.Cancel()
+        if market.ask_ticket and market.ask_ticket.Status != OrderStatus.Filled: market.ask_ticket.Cancel()
+        market.bid_ticket, market.ask_ticket = None, None
+
+    def create_orders(self, symbol):
+        """Naively creates the bid/ask orders."""
+        market = self.markets[symbol]
+        reserve_price, optimal_spread = self.get_ans_params(symbol)
+
+        # Create bid order
+        bid_quantity = self.get_bid_size(symbol)
+        bid_price = min(market.last_price, reserve_price) * (1 - optimal_spread / 2)
+        market.bid_ticket = self.LimitOrder(symbol, bid_quantity, bid_price)
+
+        # Create ask order
+        ask_quantity = self.get_ask_size(symbol)
+        ask_price = max(market.last_price, reserve_price) * (1 + optimal_spread / 2)
+        market.ask_ticket = self.LimitOrder(symbol, -ask_quantity, ask_price)
+
+        if symbol=="MKRUSD":
+            self.Debug(f"optimal spread: {optimal_spread}")
+            self.Debug(f"{bid_price} [{self.get_last_price(symbol)}|{reserve_price}] {ask_price}")
+
+    def get_ans_params(self, symbol):
+        s = self.get_last_price(symbol)
+        q = self.get_dist_to_target(symbol, self.target_alloc)
+        y = self.GetParameter("risk_aversion", 10)
+        o = self.get_volatility(symbol)
+        k = self.get_order_density(symbol)
+
+        reserve_price = s * (1 - q*y*o**2)
+        optimal_spread = 20*y*o**2 + statistics.log(1+y/k) + self.GetParameter("MAKER_FEE", 0.0017)
+
+        return reserve_price, optimal_spread
+
+    def get_reserve_price_delta(self, symbol, price):
+        s = self.get_last_price(symbol)
+        q = self.get_dist_to_target(symbol, self.target_alloc)
+        y = self.GetParameter("risk_aversion", 10)
+        o = self.get_volatility(symbol)
+
+        reserve_delta = s * q*y*o**2
+        if reserve_delta > 0 and price < s:
+            return price-reserve_delta
+        elif reserve_delta < 0 and price > s:
+            return price+reserve_delta
+        return price
+
+    def get_last_price(self, symbol):
+        market = self.markets[symbol]
+        if not market.last_price:
+            market.last_price = self.Securities[symbol].BaseCurrency.ConversionRate
+        return market.last_price
+
+    def set_last_price(self, symbol, last_price):
+        market = self.markets[symbol]
+        market.last_price = last_price
+
+    def get_bid_size(self, symbol):
+        market = self.markets[symbol]
+        if not market.bid_size:
+            order_size_usd = self.GetParameter("order_size_usd", 50)
+            market.bid_size = order_size_usd/self.Securities[symbol].BaseCurrency.ConversionRate
+        return market.bid_size
+
+    def get_ask_size(self, symbol):
+        market = self.markets[symbol]
+        if not market.ask_size:
+            order_size_usd = self.GetParameter("order_size_usd", 50)
+            market.ask_size = order_size_usd/self.Securities[symbol].BaseCurrency.ConversionRate
+        return market.ask_size
+
+    # Fetched from https://www.quantconnect.com/docs/v2/writing-algorithms/trading-and-orders/crypto-trades
+    def set_crypto_holdings(self, symbol, target_perc) -> OrderTicket:
+        crypto = self.Securities[symbol]
+        
+        quantity = self.get_quantity_to_target(symbol, target_perc)
+
+        price = crypto.AskPrice if quantity>0 else crypto.BidPrice
+        self.Debug(f"Placing market order for {quantity} {symbol}")
+        return self.MarketOrder(symbol, quantity)
+
+    def get_quantity_to_target(self, symbol, target_perc):
+        crypto = self.Securities[symbol]
+        base_currency = crypto.BaseCurrency
+
+        # Calculate the target quantity in the base currency
+        target_quantity = target_perc * (self.Portfolio.TotalPortfolioValue - self.cash_buffer) / base_currency.ConversionRate
+        quantity = target_quantity - base_currency.Amount
+
+        # Round down to observe the lot size
+        lot_size = crypto.SymbolProperties.LotSize
+        return round(quantity / lot_size) * lot_size
+
+    def get_dist_to_target(self, symbol, target_perc):
+        crypto = self.Securities[symbol]
+        base_currency = crypto.BaseCurrency
+
+        total_value = self.Portfolio.TotalPortfolioValue - self.cash_buffer
+
+        return 100 * (base_currency.Amount*base_currency.ConversionRate/total_value - self.target_alloc)
+
+    def get_volatility(self, symbol):
+        """Returns the standard deviation of the historical prices."""
+        market = self.markets[symbol]
+        if len(market.prices) < 2: return 0
+        stds = statistics.stdev(market.prices)
+        if len(market.prices_long) > 1:
+            stds += statistics.stdev(market.prices_long)
+        return stds/market.last_price + 0.0001
+
+    def get_order_density(self, symbol):
+        """Returns the market book density for the market."""
+        return 70000
+
+    def wait_till_all_filled(self, tickets):
+        unfilled = tickets.copy()
+        while unfilled:
+            new_unfilled = set()
+            for ticket in unfilled:
+                if ticket and ticket.Status != OrderStatus.Filled:
+                    new_unfilled.add(ticket)
+            unfilled = new_unfilled
+
+    def get_allocation(self, symbol):
+        crypto = self.Securities[symbol]
+        base_currency = crypto.BaseCurrency
+
+        # Calculate the target quantity in the base currency
+        total_portfolio = (self.Portfolio.TotalPortfolioValue - self.cash_buffer) / base_currency.ConversionRate    
+        return base_currency.Amount / total_portfolio

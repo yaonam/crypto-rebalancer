@@ -1,7 +1,10 @@
-pub trait Broker {
-    fn new() -> Self;
+use async_trait::async_trait;
 
-    fn connect();
+#[async_trait]
+pub trait Broker {
+    async fn new(key: String, secret: String) -> Self;
+
+    async fn connect();
 
     // Methods for strat
     fn get_total_value() -> f64;

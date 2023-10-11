@@ -1,3 +1,4 @@
-mod kraken;
+pub mod broker_trait;
+pub mod kraken;
 
-use kraken::Kraken;
+pub use kraken::Kraken;

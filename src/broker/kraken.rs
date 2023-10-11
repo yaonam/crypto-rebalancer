@@ -1,4 +1,12 @@
-use broker_trait::Broker;
+use super::broker_trait::Broker;
+use async_trait::async_trait;
+use base64::{engine::general_purpose, Engine as _};
+use hmac::{Hmac, Mac};
+use reqwest::header;
+use sha2::{Digest, Sha256, Sha512};
+use std::{str, time};
+
+const BASE_URL: &str = "https://api.kraken.com";
 
 pub struct Kraken {
     key: String,
@@ -7,23 +15,9 @@ pub struct Kraken {
     client: reqwest::Client,
 }
 
-impl Broker for Kraken {
-    async fn new(key: String, secret: String) -> Broker {
-        Broker {
-            key: key.clone(),
-            secret: secret.clone(),
-            secret_slice: general_purpose::STANDARD
-                .decode(secret.as_str())
-                .unwrap()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-            client: reqwest::Client::new(),
-        }
-    }
-
+impl Kraken {
     fn get_nonce(&self) -> String {
-        time::UNIX_EPOCH.elapsed().unwrap().as_millis().to_string();
+        time::UNIX_EPOCH.elapsed().unwrap().as_millis().to_string()
     }
 
     /// Returns a tuple of the signed data and the signature.
@@ -100,4 +94,31 @@ impl Broker for Kraken {
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         json["result"].clone()
     }
+}
+
+#[async_trait]
+impl Broker for Kraken {
+    async fn new(key: String, secret: String) -> Self {
+        Kraken {
+            key: key.clone(),
+            secret: secret.clone(),
+            secret_slice: general_purpose::STANDARD
+                .decode(secret.as_str())
+                .unwrap()
+                .as_slice()
+                .try_into()
+                .unwrap(),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    async fn connect() {}
+
+    fn get_total_value() -> f64 {
+        0.0
+    }
+
+    fn place_order() {}
+
+    fn cancel_order() {}
 }

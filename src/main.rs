@@ -1,6 +1,9 @@
 use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
-use rebalancer::task;
+use rebalancer::{
+    broker::{self, Kraken},
+    task,
+};
 use std::sync::Arc;
 use tokio::signal::ctrl_c;
 use tokio::sync::Mutex;

@@ -7,11 +7,13 @@ use hmac::{Hmac, Mac};
 use reqwest::header;
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::{str, time};
+use tokio::sync::Mutex;
 
 const BASE_URL: &str = "https://api.kraken.com";
 
-pub struct Kraken<T: Strategy> {
+pub struct Kraken<T> {
     key: String,
     secret: String,
     secret_slice: [u8; 64],
@@ -26,7 +28,7 @@ struct KrakenOrderBook {
     bids: Vec<(f64, f64, f64)>,
 }
 
-impl<T: Strategy> Kraken<T> {
+impl<T> Kraken<T> {
     async fn new(key: String, secret: String, strat: T) -> Self {
         let mut kraken = Kraken {
             key: key.clone(),
@@ -135,12 +137,12 @@ impl<T: Strategy> Kraken<T> {
 }
 
 #[async_trait]
-impl<T: Strategy> Broker<T> for Kraken<T> {
-    async fn connect(&mut self, symbol: String, strat: T) {
+impl<T> Broker for Kraken<T> {
+    async fn connect(&mut self, symbol: String) {
         // TODO: subscribe to appropriate channels
     }
 
-    async fn start(&self) {}
+    async fn start(&mut self) {}
 
     async fn get_order_book(&self, symbol: String) -> OrderBookData {
         const PATH: &str = "/0/public/Depth?pair=";

@@ -5,10 +5,10 @@ use crate::strategy::Strategy;
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait Broker<T: Strategy> {
+pub trait Broker {
     /// Adds another strategy. Will subscribe to appropriate channels and
     /// call the appropriate methods.
-    async fn connect(&mut self, strat: T);
+    async fn connect(&mut self, symbol: String);
 
     async fn start(&mut self);
 

@@ -4,9 +4,7 @@ use crate::schema::LimitOrder;
 
 #[async_trait]
 pub trait Strategy {
-    fn new();
+    async fn on_data(&self);
 
-    async fn on_data();
-
-    async fn on_order();
+    async fn on_order(&self);
 }

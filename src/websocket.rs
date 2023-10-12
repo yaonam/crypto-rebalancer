@@ -21,12 +21,12 @@ pub async fn connect_private() -> Result<(SplitSink<Socket, Message>, SplitStrea
 async fn connect(url: &str) -> Result<(SplitSink<Socket, Message>, SplitStream<Socket>), Error> {
     match connect_async(url).await {
         Ok((socket, _)) => {
-            println!("Connected to Kraken");
+            println!("Connected to websocket");
             let (sink, stream) = socket.split();
             Ok((sink, stream))
         }
         Err(e) => {
-            println!("Failed to connect to Kraken: {}", e);
+            println!("Failed to connect to websocket: {}", e);
             Err(e)
         }
     }

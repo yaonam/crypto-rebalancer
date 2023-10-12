@@ -1,19 +1,23 @@
 use super::broker_trait::Broker;
 use crate::schema::{LimitOrder, OrderBookData, OrderData};
+use crate::strategy::Strategy;
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
 use reqwest::header;
 use sha2::{Digest, Sha256, Sha512};
+use std::collections::HashMap;
 use std::{str, time};
 
 const BASE_URL: &str = "https://api.kraken.com";
 
-pub struct Kraken {
+pub struct Kraken<T: Strategy> {
     key: String,
     secret: String,
     secret_slice: [u8; 64],
     client: reqwest::Client,
+    assets: HashMap<String, (f64, f64)>, // (amount, price)
+    strat: T,
 }
 
 #[derive(serde::Deserialize)]
@@ -22,7 +26,34 @@ struct KrakenOrderBook {
     bids: Vec<(f64, f64, f64)>,
 }
 
-impl Kraken {
+impl<T: Strategy> Kraken<T> {
+    async fn new(key: String, secret: String, strat: T) -> Self {
+        let mut kraken = Kraken {
+            key: key.clone(),
+            secret: secret.clone(),
+            secret_slice: general_purpose::STANDARD
+                .decode(secret.as_str())
+                .unwrap()
+                .as_slice()
+                .try_into()
+                .unwrap(),
+            client: reqwest::Client::new(),
+            assets: HashMap::new(),
+            strat,
+        };
+
+        let balances = kraken.get_account_balances().await;
+        for (asset, balance) in balances.as_object().unwrap() {
+            let amount = balance.as_str().unwrap().parse::<f64>().unwrap();
+            let price = if asset == "ZUSD" { 1.0 } else { 0.0 };
+            kraken.assets.insert(asset.clone(), (amount, price));
+            println!("Found {}: {} @ {}", asset, amount, price)
+        }
+
+        println!("Initialized Kraken broker");
+        kraken
+    }
+
     fn get_nonce(&self) -> String {
         time::UNIX_EPOCH.elapsed().unwrap().as_millis().to_string()
     }
@@ -104,22 +135,12 @@ impl Kraken {
 }
 
 #[async_trait]
-impl Broker for Kraken {
-    fn new(key: String, secret: String) -> Self {
-        Kraken {
-            key: key.clone(),
-            secret: secret.clone(),
-            secret_slice: general_purpose::STANDARD
-                .decode(secret.as_str())
-                .unwrap()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-            client: reqwest::Client::new(),
-        }
+impl<T: Strategy> Broker<T> for Kraken<T> {
+    async fn connect(&mut self, symbol: String, strat: T) {
+        // TODO: subscribe to appropriate channels
     }
 
-    async fn connect() {}
+    async fn start(&self) {}
 
     async fn get_order_book(&self, symbol: String) -> OrderBookData {
         const PATH: &str = "/0/public/Depth?pair=";

@@ -5,3 +5,5 @@ pub mod task;
 pub mod websocket;
 
 pub mod broker;
+pub mod schema;
+pub mod strategy;

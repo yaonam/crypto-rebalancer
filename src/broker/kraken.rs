@@ -1,4 +1,5 @@
 use super::broker_trait::Broker;
+use crate::schema::{LimitOrder, OrderBookData, OrderData};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
@@ -13,6 +14,12 @@ pub struct Kraken {
     secret: String,
     secret_slice: [u8; 64],
     client: reqwest::Client,
+}
+
+#[derive(serde::Deserialize)]
+struct KrakenOrderBook {
+    asks: Vec<(f64, f64, f64)>, // (price, volume, timestamp)
+    bids: Vec<(f64, f64, f64)>,
 }
 
 impl Kraken {
@@ -98,7 +105,7 @@ impl Kraken {
 
 #[async_trait]
 impl Broker for Kraken {
-    async fn new(key: String, secret: String) -> Self {
+    fn new(key: String, secret: String) -> Self {
         Kraken {
             key: key.clone(),
             secret: secret.clone(),
@@ -114,11 +121,38 @@ impl Broker for Kraken {
 
     async fn connect() {}
 
-    fn get_total_value() -> f64 {
+    async fn get_order_book(&self, symbol: String) -> OrderBookData {
+        const PATH: &str = "/0/public/Depth?pair=";
+
+        let response = self
+            .client
+            .get(format!("{}{}{}", BASE_URL, PATH, symbol).as_str())
+            .send()
+            .await
+            .unwrap();
+
+        let body = response.text().await.unwrap();
+
+        let order_book: KrakenOrderBook = serde_json::from_str(&body).unwrap();
+
+        let asks: Vec<OrderData> = order_book
+            .asks
+            .into_iter()
+            .map(|(price, volume, _)| OrderData { price, volume })
+            .collect();
+        let bids = order_book
+            .bids
+            .into_iter()
+            .map(|(price, volume, _)| OrderData { price, volume })
+            .collect();
+        OrderBookData { asks, bids }
+    }
+
+    fn get_total_value(&self) -> f64 {
         0.0
     }
 
-    fn place_order() {}
+    fn place_order(&self, order: LimitOrder) {}
 
-    fn cancel_order() {}
+    fn cancel_order(&self, order: LimitOrder) {}
 }

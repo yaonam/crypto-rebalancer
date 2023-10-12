@@ -2,6 +2,7 @@ use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
 use rebalancer::{
     broker::{self, Kraken},
+    strategy::ANSMM,
     task,
 };
 use std::sync::Arc;

@@ -1,7 +1,4 @@
-pub trait Strategy {
-    fn new();
+pub mod ansmm;
+pub mod strategy_trait;
 
-    fn on_data();
-
-    fn on_order();
-}
+pub use ansmm::ANSMM;

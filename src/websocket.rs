@@ -18,7 +18,9 @@ pub async fn connect_private() -> Result<(SplitSink<Socket, Message>, SplitStrea
     connect("wss://ws-auth.kraken.com").await
 }
 
-async fn connect(url: &str) -> Result<(SplitSink<Socket, Message>, SplitStream<Socket>), Error> {
+pub async fn connect(
+    url: &str,
+) -> Result<(SplitSink<Socket, Message>, SplitStream<Socket>), Error> {
     match connect_async(url).await {
         Ok((socket, _)) => {
             println!("Connected to websocket");

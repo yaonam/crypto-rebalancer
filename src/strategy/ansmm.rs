@@ -1,6 +1,7 @@
 use super::strategy_trait::Strategy;
 use crate::account::Portfolio;
 use crate::messages::{OpenOrders, OrderData, PublicData, TickerData, WSPayload};
+use crate::schema::{MarketData, OrderStatus};
 use crate::websocket::send;
 use async_trait::async_trait;
 use futures_util::stream::SplitSink;
@@ -401,9 +402,9 @@ impl ANSMM {
 
 #[async_trait]
 impl Strategy for ANSMM {
-    async fn on_data(&self) {}
+    async fn on_data(&self, data: MarketData) {}
 
-    async fn on_order(&self) {}
+    async fn on_order(&self, order: OrderStatus) {}
 }
 
 fn count_decimals(s: &str) -> u8 {

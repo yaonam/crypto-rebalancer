@@ -1,19 +1,31 @@
 use super::broker_trait::Broker;
-use crate::schema::{LimitOrder, OrderBookData, OrderData};
+use crate::schema::{deserialize_data, deserialize_order, LimitOrder, OrderBookData, OrderData};
 use crate::strategy::Strategy;
+use crate::websocket::connect;
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
+use futures_util::stream::{SelectAll, SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use reqwest::header;
+use serde_json::json;
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::{str, time};
+use tokio::net::TcpStream;
+use tokio::select;
 use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::{Error, Message};
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 const BASE_URL: &str = "https://api.kraken.com";
+const WS_URL: &str = "wss://ws.kraken.com";
+const WS_AUTH_URL: &str = "wss://ws-auth.kraken.com";
 
-pub struct Kraken<T> {
+type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+pub struct Kraken<T: Strategy> {
     key: String,
     secret: String,
     secret_slice: [u8; 64],
@@ -28,7 +40,7 @@ struct KrakenOrderBook {
     bids: Vec<(f64, f64, f64)>,
 }
 
-impl<T> Kraken<T> {
+impl<T: Strategy> Kraken<T> {
     async fn new(key: String, secret: String, strat: T) -> Self {
         let mut kraken = Kraken {
             key: key.clone(),
@@ -44,6 +56,7 @@ impl<T> Kraken<T> {
             strat,
         };
 
+        // Populate assets
         let balances = kraken.get_account_balances().await;
         for (asset, balance) in balances.as_object().unwrap() {
             let amount = balance.as_str().unwrap().parse::<f64>().unwrap();
@@ -137,12 +150,62 @@ impl<T> Kraken<T> {
 }
 
 #[async_trait]
-impl<T> Broker for Kraken<T> {
-    async fn connect(&mut self, symbol: String) {
-        // TODO: subscribe to appropriate channels
-    }
+impl<T: Strategy> Broker for Kraken<T> {
+    async fn start(&mut self, symbols: Vec<String>) {
+        let (mut pub_sink, mut pub_reader) = connect(WS_URL).await.unwrap();
+        let (mut priv_sink, mut priv_reader) = connect(WS_AUTH_URL).await.unwrap();
 
-    async fn start(&mut self) {}
+        // Sub to tickers
+        for symbol in symbols {
+            let message = json!(
+            {
+                "event": "subscribe",
+                "pair": [symbol],
+                "subscription": {
+                    "name": "ticker"
+                }
+            })
+            .to_string();
+            pub_sink.send(Message::Text(message)).await.unwrap();
+        }
+
+        // Get ws token
+        let token = self.get_ws_token().await;
+        // Sub to open orders
+        let message = json!(
+        {
+            "event": "subscribe",
+            "subscription": {
+                "name": "openOrders",
+                "token": token,
+            }
+        })
+        .to_string();
+        priv_sink.send(Message::Text(message)).await.unwrap();
+
+        // let mut streams = SelectAll::new();
+        // streams.push(pub_reader);
+        // streams.push(priv_reader);
+
+        loop {
+            select! {
+                pub_msg = pub_reader.next() => {
+                    if let Some(Ok(Message::Text(data))) = pub_msg {
+                        self.strat.on_data(deserialize_data(data)).await;
+                    } else {
+                        println!("Error: {:?}", pub_msg);
+                    }
+                },
+                priv_msg = priv_reader.next() => {
+                    if let Some(Ok(Message::Text(order))) = priv_msg {
+                        self.strat.on_order(deserialize_order(order)).await;
+                    } else {
+                        println!("Error: {:?}", priv_msg);
+                    }
+                }
+            }
+        }
+    }
 
     async fn get_order_book(&self, symbol: String) -> OrderBookData {
         const PATH: &str = "/0/public/Depth?pair=";

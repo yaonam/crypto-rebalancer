@@ -13,18 +13,16 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[async_trait]
 pub trait Broker {
-    async fn subscribe(
+    async fn connect(
         &mut self,
         symbols: Vec<String>,
     ) -> (
         SplitSink<Socket, Message>,
-        SplitStream<Socket>,
         SplitSink<Socket, Message>,
-        SplitStream<Socket>,
         String,
     );
 
-    async fn start(&mut self, pub_reader: SplitStream<Socket>, priv_reader: SplitStream<Socket>);
+    async fn start(&mut self);
 }
 
 #[async_trait]

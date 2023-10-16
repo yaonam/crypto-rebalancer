@@ -2,7 +2,7 @@ use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
 use rebalancer::broker::broker_trait::Broker;
 use rebalancer::{
-    broker::{self, Kraken, KrakenStatic},
+    broker::{Kraken, KrakenStatic},
     strategy::ANSMM,
     task,
 };
@@ -15,16 +15,23 @@ async fn main() {
     dotenv().ok();
 
     let broker_static = KrakenStatic::new();
-    let strat = ANSMM::new("ETH/USD".to_string(), Arc::new(broker_static));
-    let mut broker = Kraken::new(
+    let mut broker = Kraken::<ANSMM<KrakenStatic>>::new(
         std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
         std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
-        strat,
     )
     .await;
-    let (pub_sink, pub_reader, priv_sink, priv_reader, token) =
-        broker.subscribe(vec!["ETH/USD".to_string()]).await;
-    let task = broker.start(pub_reader, priv_reader);
+    let strat = ANSMM::new(
+        vec!["ETH/USD".to_string()],
+        Arc::new(broker_static),
+        &mut broker,
+    )
+    .await;
+    // let task = tokio::spawn(async move {
+    //     let _ = broker.start();
+    // });
+    let task = tokio::spawn(async move {
+        let _ = broker.start();
+    });
     let _ = tokio::select! {
         _ = task => (),
         _ = ctrl_c() => (), // Graceful shutdown

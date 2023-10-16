@@ -45,16 +45,22 @@ pub struct ANSMM<T: BrokerStatic> {
     ask_orders: HashMap<String, OrderOpened>,
 
     // Broker
-    broker: Arc<T>,
-    token: Option<String>, // Access token
-    pub_sink: Option<SplitSink<Socket, Message>>,
-    priv_sink: Option<SplitSink<Socket, Message>>,
+    broker_static: Arc<T>,
+    token: String, // Access token
+    pub_sink: SplitSink<Socket, Message>,
+    priv_sink: SplitSink<Socket, Message>,
 }
 
 impl<T: BrokerStatic> ANSMM<T> {
-    pub fn new(pair: String, broker: Arc<T>) -> Self {
+    pub async fn new<U: Broker>(
+        symbols: Vec<String>,
+        broker_static: Arc<T>,
+        broker: &mut U,
+    ) -> Self {
+        let (pub_sink, priv_sink, token) = broker.connect(symbols).await;
+
         ANSMM {
-            pair,
+            pair: String::new(),
             decimals: DECIMALS,
 
             portfolio: Arc::new(Mutex::new(Portfolio::new())),
@@ -68,10 +74,10 @@ impl<T: BrokerStatic> ANSMM<T> {
             bid_orders: HashMap::new(),
             ask_orders: HashMap::new(),
 
-            broker,
-            token: Option::None,
-            pub_sink: Option::None,
-            priv_sink: Option::None,
+            broker_static,
+            token,
+            pub_sink,
+            priv_sink,
         }
     }
 
@@ -86,7 +92,7 @@ impl<T: BrokerStatic> ANSMM<T> {
         let ask_size = self.get_ask_size();
 
         // Borrows self as mut
-        let mut priv_sink = self.priv_sink.as_mut().unwrap();
+        let mut priv_sink = &self.priv_sink;
 
         // if !ANSMM::<T>::similar_order_exists("buy", bid_price, &self.bid_orders) {
         // let message = json!(
@@ -131,18 +137,16 @@ impl<T: BrokerStatic> ANSMM<T> {
             .map(|k| (*k).as_str())
             .collect();
         if !keys.is_empty() {
-            if let Some(ref mut priv_sink) = &mut self.priv_sink {
-                let message = json!(
-                    {
-                        "event": "cancelOrder",
-                        "token": self.token,
-                        "txid": keys
-                    }
-                )
-                .to_string();
-                println!("{}", message);
-                send(priv_sink, &message).await.unwrap();
-            }
+            let message = json!(
+                {
+                    "event": "cancelOrder",
+                    "token": self.token,
+                    "txid": keys
+                }
+            )
+            .to_string();
+            println!("{}", message);
+            send(&mut self.priv_sink, &message).await.unwrap();
         }
     }
 

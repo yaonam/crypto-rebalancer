@@ -30,8 +30,9 @@ pub struct Kraken<T: Strategy> {
     secret: String,
     secret_slice: [u8; 64],
     client: reqwest::Client,
-    assets: HashMap<String, (f64, f64)>, // (amount, price)
-    strat: T,
+    pub_reader: Option<SplitStream<Socket>>,
+    priv_reader: Option<SplitStream<Socket>>,
+    strat: Option<T>,
 }
 
 #[derive(serde::Deserialize)]
@@ -41,8 +42,8 @@ struct KrakenOrderBook {
 }
 
 impl<T: Strategy> Kraken<T> {
-    pub async fn new(key: String, secret: String, strat: T) -> Self {
-        let mut kraken = Kraken {
+    pub async fn new(key: String, secret: String) -> Self {
+        Kraken {
             key: key.clone(),
             secret: secret.clone(),
             secret_slice: general_purpose::STANDARD
@@ -52,21 +53,22 @@ impl<T: Strategy> Kraken<T> {
                 .try_into()
                 .unwrap(),
             client: reqwest::Client::new(),
-            assets: HashMap::new(),
-            strat,
-        };
-
-        // Populate assets
-        let balances = kraken.get_account_balances().await;
-        for (asset, balance) in balances.as_object().unwrap() {
-            let amount = balance.as_str().unwrap().parse::<f64>().unwrap();
-            let price = if asset == "ZUSD" { 1.0 } else { 0.0 };
-            kraken.assets.insert(asset.clone(), (amount, price));
-            println!("Found {}: {} @ {}", asset, amount, price)
+            pub_reader: Option::None,
+            priv_reader: Option::None,
+            strat: Option::None,
         }
 
-        println!("Initialized Kraken broker");
-        kraken
+        // Populate assets
+        // let balances = kraken.get_account_balances().await;
+        // for (asset, balance) in balances.as_object().unwrap() {
+        //     let amount = balance.as_str().unwrap().parse::<f64>().unwrap();
+        //     let price = if asset == "ZUSD" { 1.0 } else { 0.0 };
+        //     kraken.assets.insert(asset.clone(), (amount, price));
+        //     println!("Found {}: {} @ {}", asset, amount, price)
+        // }
+
+        // println!("Initialized Kraken broker");
+        // kraken
     }
 
     fn get_nonce(&self) -> String {
@@ -151,18 +153,19 @@ impl<T: Strategy> Kraken<T> {
 
 #[async_trait]
 impl<T: Strategy> Broker for Kraken<T> {
-    async fn subscribe(
+    async fn connect(
         &mut self,
         symbols: Vec<String>,
     ) -> (
         SplitSink<Socket, Message>,
-        SplitStream<Socket>,
         SplitSink<Socket, Message>,
-        SplitStream<Socket>,
         String,
     ) {
         let (mut pub_sink, mut pub_reader) = connect(WS_URL).await.unwrap();
         let (mut priv_sink, mut priv_reader) = connect(WS_AUTH_URL).await.unwrap();
+
+        self.pub_reader = Some(pub_reader);
+        self.priv_reader = Some(priv_reader);
 
         // Sub to tickers
         for symbol in symbols {
@@ -192,27 +195,23 @@ impl<T: Strategy> Broker for Kraken<T> {
         .to_string();
         priv_sink.send(Message::Text(message)).await.unwrap();
 
-        (pub_sink, pub_reader, priv_sink, priv_reader, token)
+        (pub_sink, priv_sink, token)
     }
 
-    async fn start(
-        &mut self,
-        mut pub_reader: SplitStream<Socket>,
-        mut priv_reader: SplitStream<Socket>,
-    ) {
+    async fn start(&mut self) {
         loop {
             select! {
-                pub_msg = pub_reader.next() => {
+                pub_msg = self.pub_reader.as_mut().unwrap().next() => {
                     if let Some(Ok(Message::Text(data))) = pub_msg {
                         // TODO: convert kraken data to generic data
-                        self.strat.on_data(deserialize_data(data)).await;
+                        self.strat.as_mut().unwrap().on_data(deserialize_data(data)).await;
                     } else {
                         println!("Error: {:?}", pub_msg);
                     }
                 },
-                priv_msg = priv_reader.next() => {
+                priv_msg = self.priv_reader.as_mut().unwrap().next() => {
                     if let Some(Ok(Message::Text(order))) = priv_msg {
-                        self.strat.on_order(deserialize_order(order)).await;
+                        self.strat.as_mut().unwrap().on_order(deserialize_order(order)).await;
                     } else {
                         println!("Error: {:?}", priv_msg);
                     }

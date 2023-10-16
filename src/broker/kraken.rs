@@ -1,4 +1,4 @@
-use super::broker_trait::Broker;
+use super::broker_trait::{Broker, BrokerStatic};
 use crate::schema::{deserialize_data, deserialize_order, LimitOrder, OrderBookData, OrderData};
 use crate::strategy::Strategy;
 use crate::websocket::connect;
@@ -41,7 +41,7 @@ struct KrakenOrderBook {
 }
 
 impl<T: Strategy> Kraken<T> {
-    async fn new(key: String, secret: String, strat: T) -> Self {
+    pub async fn new(key: String, secret: String, strat: T) -> Self {
         let mut kraken = Kraken {
             key: key.clone(),
             secret: secret.clone(),
@@ -151,7 +151,16 @@ impl<T: Strategy> Kraken<T> {
 
 #[async_trait]
 impl<T: Strategy> Broker for Kraken<T> {
-    async fn start(&mut self, symbols: Vec<String>) {
+    async fn subscribe(
+        &mut self,
+        symbols: Vec<String>,
+    ) -> (
+        SplitSink<Socket, Message>,
+        SplitStream<Socket>,
+        SplitSink<Socket, Message>,
+        SplitStream<Socket>,
+        String,
+    ) {
         let (mut pub_sink, mut pub_reader) = connect(WS_URL).await.unwrap();
         let (mut priv_sink, mut priv_reader) = connect(WS_AUTH_URL).await.unwrap();
 
@@ -183,14 +192,19 @@ impl<T: Strategy> Broker for Kraken<T> {
         .to_string();
         priv_sink.send(Message::Text(message)).await.unwrap();
 
-        // let mut streams = SelectAll::new();
-        // streams.push(pub_reader);
-        // streams.push(priv_reader);
+        (pub_sink, pub_reader, priv_sink, priv_reader, token)
+    }
 
+    async fn start(
+        &mut self,
+        mut pub_reader: SplitStream<Socket>,
+        mut priv_reader: SplitStream<Socket>,
+    ) {
         loop {
             select! {
                 pub_msg = pub_reader.next() => {
                     if let Some(Ok(Message::Text(data))) = pub_msg {
+                        // TODO: convert kraken data to generic data
                         self.strat.on_data(deserialize_data(data)).await;
                     } else {
                         println!("Error: {:?}", pub_msg);
@@ -206,12 +220,22 @@ impl<T: Strategy> Broker for Kraken<T> {
             }
         }
     }
+}
 
-    async fn get_order_book(&self, symbol: String) -> OrderBookData {
+pub struct KrakenStatic {}
+
+impl KrakenStatic {
+    pub fn new() -> Self {
+        KrakenStatic {}
+    }
+}
+
+#[async_trait]
+impl BrokerStatic for KrakenStatic {
+    async fn get_order_book(client: reqwest::Client, symbol: String) -> OrderBookData {
         const PATH: &str = "/0/public/Depth?pair=";
 
-        let response = self
-            .client
+        let response = client
             .get(format!("{}{}{}", BASE_URL, PATH, symbol).as_str())
             .send()
             .await
@@ -234,11 +258,29 @@ impl<T: Strategy> Broker for Kraken<T> {
         OrderBookData { asks, bids }
     }
 
-    fn get_total_value(&self) -> f64 {
+    async fn get_assets() -> f64 {
         0.0
     }
 
-    fn place_order(&self, order: LimitOrder) {}
+    async fn place_order(
+        priv_sink: &mut SplitSink<Socket, Message>,
+        order: LimitOrder,
+        token: String,
+    ) {
+        let message = json!(
+            {
+                "event": "addOrder",
+                "ordertype": "limit",
+                "pair": order.asset,
+                "price": order.price,
+                "token": token,
+                "type": order.side,
+                "volume": order.volume.to_string(),
+            }
+        )
+        .to_string();
+        priv_sink.send(Message::Text(message)).await.unwrap();
+    }
 
-    fn cancel_order(&self, order: LimitOrder) {}
+    async fn cancel_order(order: LimitOrder) {}
 }

@@ -1,7 +1,8 @@
 use dotenv::dotenv;
 use rebalancer::account::{Portfolio, Signer};
+use rebalancer::broker::broker_trait::Broker;
 use rebalancer::{
-    broker::{self, Kraken},
+    broker::{self, Kraken, KrakenStatic},
     strategy::ANSMM,
     task,
 };
@@ -13,13 +14,29 @@ use tokio::sync::Mutex;
 async fn main() {
     dotenv().ok();
 
-    let signer = Arc::new(Mutex::new(
-        Signer::new(
-            std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
-            std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
-        )
-        .await,
-    ));
+    let broker_static = KrakenStatic::new();
+    let strat = ANSMM::new("ETH/USD".to_string(), Arc::new(broker_static));
+    let mut broker = Kraken::new(
+        std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
+        std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
+        strat,
+    )
+    .await;
+    let (pub_sink, pub_reader, priv_sink, priv_reader, token) =
+        broker.subscribe(vec!["ETH/USD".to_string()]).await;
+    let task = broker.start(pub_reader, priv_reader);
+    let _ = tokio::select! {
+        _ = task => (),
+        _ = ctrl_c() => (), // Graceful shutdown
+    };
+
+    // let signer = Arc::new(Mutex::new(
+    //     Signer::new(
+    //         std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
+    //         std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
+    //     )
+    //     .await,
+    // ));
 
     // {
     //     let signer = signer.lock().unwrap();
@@ -30,18 +47,18 @@ async fn main() {
     //     println!("{:?}", balances);
     // }
 
-    let portfolio = Arc::new(Mutex::new(Portfolio::new(signer.clone()).await));
+    // let portfolio = Arc::new(Mutex::new(Portfolio::new(signer.clone()).await));
 
-    let pair1 = "ETH/USD".to_string();
-    let pair2 = "STORJ/USD".to_string();
+    // let pair1 = "ETH/USD".to_string();
+    // let pair2 = "STORJ/USD".to_string();
 
-    let task1 = task::spawn(pair1, portfolio.clone(), signer.clone()).await;
-    let task2 = task::spawn(pair2, portfolio.clone(), signer.clone()).await;
+    // let task1 = task::spawn(pair1, portfolio.clone(), signer.clone()).await;
+    // let task2 = task::spawn(pair2, portfolio.clone(), signer.clone()).await;
 
-    let _ = tokio::select! {
-        _ = task1 => (),
-        _ = task2 => (),
-        _ = ctrl_c() => (), // Graceful shutdown
-    };
+    // let _ = tokio::select! {
+    //     _ = task1 => (),
+    //     _ = task2 => (),
+    //     _ = ctrl_c() => (), // Graceful shutdown
+    // };
     // let _ = tokio::join!(task1, task2);
 }

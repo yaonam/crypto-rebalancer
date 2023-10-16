@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -6,7 +8,14 @@ use serde_json;
 pub enum MarketData {
     OHLC(OHLCData),
     Trade(TradeData),
-    OrderBook(OrderBookData),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TickerData {
+    pub ask_price: f64,
+    pub ask_volume: f64,
+    pub bid_price: f64,
+    pub bid_volume: f64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,50 +50,66 @@ pub struct OrderBookData {
 pub struct LimitOrder {
     pub id: String,
     pub asset: String,
-    pub amount: f64,
+    pub volume: f64,
     pub price: f64,
+    pub side: OrderSide,
     pub time: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum OrderStatus {
-    Open(),
+    Opened(OrderOpened),
     Filled(OrderFilled),
     Cancelled(OrderCancelled),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum OrderSide {
+    BUY,
+    SELL,
+}
+
+impl fmt::Display for OrderSide {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            OrderSide::BUY => write!(f, "buy"),
+            OrderSide::SELL => write!(f, "sell"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderOpened {
     pub id: String,
     pub asset: String,
-    pub amount: f64,
+    pub volume: f64,
     pub price: f64,
     pub status: String,
-    pub side: String,
+    pub side: OrderSide,
     pub time: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderFilled {
     pub id: String,
-    pub asset: String,
-    pub amount: f64,
-    pub price: f64,
-    pub status: String,
-    pub side: String,
-    pub time: String,
+    // pub asset: String,
+    // pub amount: f64,
+    // pub price: f64,
+    // pub status: String,
+    // pub side: OrderSide,
+    // pub time: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderCancelled {
     pub id: String,
-    pub asset: String,
-    pub amount: f64,
-    pub price: f64,
-    pub status: String,
-    pub side: String,
-    pub time: String,
+    // pub asset: String,
+    // pub amount: f64,
+    // pub price: f64,
+    // pub status: String,
+    // pub side: OrderSide,
+    // pub time: String,
 }
 
 pub fn deserialize_data(data: String) -> MarketData {

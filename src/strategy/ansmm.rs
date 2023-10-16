@@ -1,7 +1,7 @@
 use super::strategy_trait::Strategy;
-use crate::account::Portfolio;
-use crate::messages::{OpenOrders, OrderData, PublicData, TickerData, WSPayload};
-use crate::schema::{MarketData, OrderStatus};
+use crate::broker::broker_trait::{Broker, BrokerStatic};
+use crate::portfolio::Portfolio;
+use crate::schema::{MarketData, OHLCData, OrderOpened, OrderStatus};
 use crate::websocket::send;
 use async_trait::async_trait;
 use futures_util::stream::SplitSink;
@@ -26,12 +26,13 @@ const UPDATE_PRICE_THRESHOLD: f64 = 0.0001;
 
 const DECIMALS: u8 = 99;
 
-pub struct ANSMM {
+pub struct ANSMM<T: BrokerStatic> {
     // Constants
     pair: String,
     decimals: u8,
 
     // Market data
+    portfolio: Arc<Mutex<Portfolio>>,
     last_price: f64,
     prices: VecDeque<f64>,
     prices_last_updated: u64,
@@ -40,25 +41,23 @@ pub struct ANSMM {
     vol_24hr: f64,
 
     // Orders
-    bid_orders: HashMap<String, OrderData>,
-    ask_orders: HashMap<String, OrderData>,
+    bid_orders: HashMap<String, OrderOpened>,
+    ask_orders: HashMap<String, OrderOpened>,
 
-    // Misc
-    portfolio: Arc<Mutex<Portfolio>>,
-    priv_sink: SplitSink<Socket, Message>,
-    token: String, // Access token
+    // Broker
+    broker: Arc<T>,
+    token: Option<String>, // Access token
+    pub_sink: Option<SplitSink<Socket, Message>>,
+    priv_sink: Option<SplitSink<Socket, Message>>,
 }
 
-impl ANSMM {
-    pub fn new(
-        pair: String,
-        portfolio: Arc<Mutex<Portfolio>>,
-        priv_sink: SplitSink<Socket, Message>,
-        token: String,
-    ) -> Self {
+impl<T: BrokerStatic> ANSMM<T> {
+    pub fn new(pair: String, broker: Arc<T>) -> Self {
         ANSMM {
             pair,
             decimals: DECIMALS,
+
+            portfolio: Arc::new(Mutex::new(Portfolio::new())),
             last_price: 0.0,
             prices: VecDeque::with_capacity(BUFFER_SIZE),
             prices_last_updated: 0,
@@ -69,185 +68,57 @@ impl ANSMM {
             bid_orders: HashMap::new(),
             ask_orders: HashMap::new(),
 
-            portfolio,
-            priv_sink,
-            token,
+            broker,
+            token: Option::None,
+            pub_sink: Option::None,
+            priv_sink: Option::None,
         }
-    }
-
-    pub async fn on_message(&mut self, message: String) {
-        let deserialized: Result<WSPayload, serde_json::Error> = serde_json::from_str(&message);
-        match deserialized {
-            Ok(data) => match data {
-                WSPayload::PublicMessage(pub_msg) => match pub_msg.data {
-                    PublicData::Ticker(data) => self.on_data(data).await,
-                    _ => {
-                        println!("[{}] Unhandled public message: {:?}", self.pair, pub_msg);
-                    }
-                },
-                WSPayload::OpenOrders(orders) => self.handle_order_update(orders).await,
-                WSPayload::Heartbeat(_heartbeat) => self.record_price(),
-                _ => {
-                    println!("[{}] Unhandled message: {:?}", self.pair, data);
-                }
-            },
-            Err(e) => println!("[{}] Error: {}", self.pair, e),
-        }
-    }
-
-    async fn handle_order_update(&mut self, orders: OpenOrders) {
-        for order in orders.orders {
-            for (order_id, order_data) in order {
-                match order_data.status.as_str() {
-                    "pending" | "open" => {
-                        println!("[{}] Order {}: {}", self.pair, order_data.status, order_id);
-                        if order_data.descr.is_none() {
-                            println!("[{}] Order descr is None", self.pair);
-                            continue;
-                        }
-                        if order_data.descr.as_ref().unwrap().pair != self.pair {
-                            continue;
-                        }
-                        match order_data.descr.as_ref().unwrap()._type.as_str() {
-                            "buy" => {
-                                if !self.bid_orders.contains_key(&order_id) {
-                                    self.bid_orders.insert(order_id.clone(), order_data);
-                                }
-                            }
-                            "sell" => {
-                                if !self.ask_orders.contains_key(&order_id) {
-                                    self.ask_orders.insert(order_id.clone(), order_data);
-                                }
-                            }
-                            _ => {
-                                println!(
-                                    "[{}] Unhandled order type: {}",
-                                    self.pair,
-                                    order_data.descr.as_ref().unwrap()._type
-                                );
-                            }
-                        }
-                    }
-                    "closed" => {
-                        println!("[{}] Order filled: {}", self.pair, order_id);
-                        if let Some(order) = self.bid_orders.remove(&order_id) {
-                            self.on_order_filled(order).await;
-                        } else if let Some(order) = self.ask_orders.remove(&order_id) {
-                            self.on_order_filled(order).await;
-                        }
-                    }
-                    "canceled" => {
-                        println!("[{}] Order cancelled: {}", self.pair, order_id);
-                        self.bid_orders.remove(&order_id);
-                        self.ask_orders.remove(&order_id);
-                    }
-                    _ => {
-                        println!(
-                            "[{}] Unhandled order status: {}",
-                            self.pair, order_data.status
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    async fn on_data(&mut self, data: TickerData) {
-        let bid_price = data.b[0].as_str().unwrap().parse::<f64>().unwrap();
-        let ask_price = data.a[0].as_str().unwrap().parse::<f64>().unwrap();
-        self.record_spread(bid_price, ask_price);
-
-        // Initialize
-        let decimals = count_decimals(&bid_price.to_string());
-        if self.last_price == 0.0 {
-            self.last_price = (bid_price + ask_price) / 2.0;
-            self.decimals = decimals;
-        } else if decimals > self.decimals {
-            self.decimals = decimals; // In case prev count had trailing zeros
-        }
-        self.record_price();
-
-        self.vol_24hr = data.v[0].as_str().unwrap().parse::<f64>().unwrap();
-
-        if self.bid_orders.is_empty() && self.ask_orders.is_empty() {
-            self.cancel_orders().await;
-            self.create_orders().await;
-        }
-
-        let (reserve_price, optimal_spread) = self.get_ans_params().await;
-        println!(
-            "Last price: {}, Bid: {}, Ask: {}",
-            self.last_price, bid_price, ask_price
-        );
-        println!("Reserve price: {}", reserve_price);
-        println!("Optimal spread: {}", optimal_spread);
-    }
-
-    async fn on_order_filled(&mut self, order: OrderData) {
-        println!("[{}] Order filled: {:?}", self.pair, order);
-
-        let descr = &order.descr.unwrap();
-        let price = descr.price.parse::<f64>().unwrap();
-        self.last_price = price;
-        self.record_price();
-
-        {
-            // Update portfolio balances
-            let mut portfolio = self.portfolio.lock().await;
-            let (amount, _) = portfolio.get_asset(self.pair.clone());
-            let new_amount: f64 = if descr._type == "buy" {
-                amount + order.vol.unwrap().parse::<f64>().unwrap()
-            } else {
-                amount - order.vol.unwrap().parse::<f64>().unwrap()
-            };
-            portfolio.set_asset(self.pair.clone(), new_amount, price);
-        }
-
-        self.cancel_orders().await;
-        self.create_orders().await;
     }
 
     async fn create_orders(&mut self) {
         println!("[{}] Creating orders...", self.pair);
 
         let (reserve_price, optimal_spread) = self.get_ans_params().await;
-        let bid_price = reserve_price * (1.0 - optimal_spread / 2.0);
-        let ask_price = reserve_price * (1.0 + optimal_spread / 2.0);
+        let bid_price = self.round_price(reserve_price * (1.0 - optimal_spread / 2.0));
+        let ask_price = self.round_price(reserve_price * (1.0 + optimal_spread / 2.0));
 
         let bid_size = self.get_bid_size();
         let ask_size = self.get_ask_size();
 
-        if !ANSMM::similar_order_exists("buy", bid_price, &self.bid_orders) {
-            let message = json!(
-                {
-                    "event": "addOrder",
-                    "ordertype": "limit",
-                    "pair": self.pair,
-                    "price": self.round_price(bid_price),
-                    "token": self.token,
-                    "type": "buy",
-                    "volume": bid_size.to_string(),
-                }
-            )
-            .to_string();
-            send(&mut self.priv_sink, &message).await.unwrap();
-        }
+        // Borrows self as mut
+        let mut priv_sink = self.priv_sink.as_mut().unwrap();
 
-        if !ANSMM::similar_order_exists("sell", ask_price, &self.ask_orders) {
-            let message = json!(
-                {
-                    "event": "addOrder",
-                    "ordertype": "limit",
-                    "pair": self.pair,
-                    "price": self.round_price(ask_price),
-                    "token": self.token,
-                    "type": "sell",
-                    "volume": ask_size.to_string(),
-                }
-            )
-            .to_string();
-            send(&mut self.priv_sink, &message).await.unwrap();
-        }
+        // if !ANSMM::<T>::similar_order_exists("buy", bid_price, &self.bid_orders) {
+        // let message = json!(
+        //     {
+        //         "event": "addOrder",
+        //         "ordertype": "limit",
+        //         "pair": self.pair,
+        //         "price": bid_price,
+        //         "token": self.token,
+        //         "type": "buy",
+        //         "volume": bid_size.to_string(),
+        //     }
+        // )
+        // .to_string();
+        // send(&mut priv_sink, &message).await.unwrap();
+        // }
+
+        // if !ANSMM::<T>::similar_order_exists("sell", ask_price, &self.ask_orders) {
+        // let message = json!(
+        //     {
+        //         "event": "addOrder",
+        //         "ordertype": "limit",
+        //         "pair": self.pair,
+        //         "price": ask_price,
+        //         "token": self.token,
+        //         "type": "sell",
+        //         "volume": ask_size.to_string(),
+        //     }
+        // )
+        // .to_string();
+        // send(&mut priv_sink, &message).await.unwrap();
+        // }
     }
 
     async fn cancel_orders(&mut self) {
@@ -260,16 +131,18 @@ impl ANSMM {
             .map(|k| (*k).as_str())
             .collect();
         if !keys.is_empty() {
-            let message = json!(
-                {
-                    "event": "cancelOrder",
-                    "token": self.token,
-                    "txid": keys
-                }
-            )
-            .to_string();
-            println!("{}", message);
-            send(&mut self.priv_sink, &message).await.unwrap();
+            if let Some(ref mut priv_sink) = &mut self.priv_sink {
+                let message = json!(
+                    {
+                        "event": "cancelOrder",
+                        "token": self.token,
+                        "txid": keys
+                    }
+                )
+                .to_string();
+                println!("{}", message);
+                send(priv_sink, &message).await.unwrap();
+            }
         }
     }
 
@@ -385,26 +258,41 @@ impl ANSMM {
         ((price * factor).round() / factor).to_string()
     }
 
-    fn similar_order_exists(_type: &str, price: f64, orders: &HashMap<String, OrderData>) -> bool {
-        for (_, order) in orders {
-            if order.descr.is_none() {
-                continue;
-            }
-            let order_price = order.descr.as_ref().unwrap().price.parse::<f64>().unwrap();
+    // fn similar_order_exists(
+    //     _type: &str,
+    //     price: f64,
+    //     orders: &HashMap<String, OrderOpened>,
+    // ) -> bool {
+    //     for (_, order) in orders {
+    //         if order.descr.is_none() {
+    //             continue;
+    //         }
+    //         let order_price = order.descr.as_ref().unwrap().price.parse::<f64>().unwrap();
 
-            if (1.0 - order_price / price).abs() < UPDATE_PRICE_THRESHOLD {
-                return true;
-            }
-        }
-        false
-    }
+    //         if (1.0 - order_price / price).abs() < UPDATE_PRICE_THRESHOLD {
+    //             return true;
+    //         }
+    //     }
+    //     false
+    // }
 }
 
 #[async_trait]
-impl Strategy for ANSMM {
-    async fn on_data(&self, data: MarketData) {}
+impl<T: BrokerStatic> Strategy for ANSMM<T> {
+    async fn on_data(&self, data: MarketData) {
+        match data {
+            MarketData::OHLC(ohlc) => {}
+            MarketData::Trade(trade) => {}
+        }
+    }
 
-    async fn on_order(&self, order: OrderStatus) {}
+    async fn on_order(&self, order: OrderStatus) {
+        match order {
+            OrderStatus::Opened(opened) => {}
+            OrderStatus::Filled(filled) => {}
+            OrderStatus::Cancelled(cancelled) => {}
+        }
+    }
 }
 
 fn count_decimals(s: &str) -> u8 {

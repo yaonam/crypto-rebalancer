@@ -16,7 +16,7 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub trait Broker<T: Strategy> {
     async fn connect(
         &mut self,
-        symbols: Vec<String>,
+        symbols: Vec<&str>,
     ) -> (
         SplitSink<Socket, Message>,
         SplitSink<Socket, Message>,

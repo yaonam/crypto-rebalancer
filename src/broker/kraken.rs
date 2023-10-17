@@ -159,6 +159,7 @@ impl<T: Strategy> Kraken<T> {
         match serde_json::from_str::<KrakenPublicMessage>(s) {
             Ok(msg) => match msg.data {
                 KrakenPublicData::OHLC(ohlc) => MarketData::OHLC(OHLCData {
+                    pair: msg.pair,
                     open: ohlc.open.parse().unwrap(),
                     high: ohlc.high.parse().unwrap(),
                     low: ohlc.low.parse().unwrap(),
@@ -167,6 +168,7 @@ impl<T: Strategy> Kraken<T> {
                     time: ohlc.time,
                 }),
                 KrakenPublicData::Trade(trade) => MarketData::Trade(TradeData {
+                    pair: msg.pair,
                     price: trade.price.parse().unwrap(),
                     volume: trade.volume.parse().unwrap(),
                     time: trade.time,
@@ -175,6 +177,7 @@ impl<T: Strategy> Kraken<T> {
             Err(e) => {
                 println!("{}: {}", e, s);
                 MarketData::OHLC(OHLCData {
+                    pair: String::new(),
                     open: 0.0,
                     high: 0.0,
                     low: 0.0,
@@ -191,7 +194,7 @@ impl<T: Strategy> Kraken<T> {
 impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
     async fn connect(
         &mut self,
-        symbols: Vec<String>,
+        symbols: Vec<&str>,
     ) -> (
         SplitSink<Socket, Message>,
         SplitSink<Socket, Message>,
@@ -204,19 +207,17 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
         self.priv_reader = Some(priv_reader);
 
         // Sub to ohlc
-        for symbol in symbols {
-            let message = json!(
-            {
-                "event": "subscribe",
-                "pair": [symbol],
-                "subscription": {
-                    "interval": 5,
-                    "name": "ohlc"
-                }
-            })
-            .to_string();
-            pub_sink.send(Message::Text(message)).await.unwrap();
-        }
+        let message = json!(
+        {
+            "event": "subscribe",
+            "pair": symbols,
+            "subscription": {
+                "interval": 5,
+                "name": "ohlc"
+            }
+        })
+        .to_string();
+        pub_sink.send(Message::Text(message)).await.unwrap();
 
         // Get ws token
         let token = self.get_ws_token().await;
@@ -245,7 +246,9 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
             select! {
                 pub_msg = self.pub_reader.as_mut().unwrap().next() => {
                     if let Some(Ok(Message::Text(data))) = pub_msg {
-                        // TODO: convert kraken data to generic data
+                        if data == r#"{"event":"heartbeat"}"# {
+                            continue
+                        }
                         let deserialized = Kraken::<T>::deserialize_data(&data);
                         let strat_clone = strat.clone();
                         tokio::spawn(async move {strat_clone.on_data(deserialized).await});
@@ -255,6 +258,9 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
                 },
                 priv_msg = self.priv_reader.as_mut().unwrap().next() => {
                     if let Some(Ok(Message::Text(order))) = priv_msg {
+                        if order == r#"{"event":"heartbeat"}"# {
+                            continue
+                        }
                         let strat_clone = strat.clone();
                         tokio::spawn(async move {strat_clone.on_order(deserialize_order(order)).await});
                     } else {

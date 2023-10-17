@@ -22,7 +22,7 @@ async fn main() {
     .await;
     println!("Broker initialized");
     ANSMM::new(
-        vec!["ETH/USD".to_string()],
+        vec!["ETH/USD", "STORJ/USD"],
         Arc::new(broker_static),
         &mut broker,
     )

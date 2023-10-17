@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -52,7 +53,7 @@ pub struct ANSMM<T: BrokerStatic> {
 }
 
 impl<T: BrokerStatic> ANSMM<T> {
-    pub async fn new<U: Broker<Self>>(symbols: Vec<String>, broker_static: Arc<T>, broker: &mut U) {
+    pub async fn new<U: Broker<Self>>(symbols: Vec<&str>, broker_static: Arc<T>, broker: &mut U) {
         let (pub_sink, priv_sink, token) = broker.connect(symbols).await;
 
         let strat = ANSMM {
@@ -282,7 +283,7 @@ impl<T: BrokerStatic> ANSMM<T> {
 #[async_trait]
 impl<T: BrokerStatic> Strategy for ANSMM<T> {
     async fn on_data(&self, data: MarketData) {
-        println!("Got to on_data()");
+        println!("on_data() called {:?}", data);
         match data {
             MarketData::OHLC(ohlc) => {}
             MarketData::Trade(trade) => {}
@@ -290,7 +291,7 @@ impl<T: BrokerStatic> Strategy for ANSMM<T> {
     }
 
     async fn on_order(&self, order: OrderStatus) {
-        println!("Got to on_order()");
+        println!("on_order() finished {:?}", order);
         match order {
             OrderStatus::Opened(opened) => {}
             OrderStatus::Filled(filled) => {}

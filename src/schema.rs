@@ -19,6 +19,7 @@ pub struct TickerData {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OHLCData {
+    pub pair: String,
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -29,6 +30,7 @@ pub struct OHLCData {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TradeData {
+    pub pair: String,
     pub price: f64,
     pub volume: f64,
     pub time: String,
@@ -117,6 +119,7 @@ pub fn deserialize_data(data: String) -> MarketData {
         Err(e) => {
             println!("{}: {}", e, data);
             MarketData::OHLC(OHLCData {
+                pair: String::new(),
                 open: 0.0,
                 high: 0.0,
                 low: 0.0,

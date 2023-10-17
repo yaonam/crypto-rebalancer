@@ -1,7 +1,7 @@
 use super::strategy_trait::Strategy;
 use crate::broker::broker_trait::{Broker, BrokerStatic};
 use crate::portfolio::Portfolio;
-use crate::schema::{MarketData, OHLCData, OrderOpened, OrderStatus};
+use crate::schema::{MarketData, OrderOpened, OrderStatus};
 use crate::websocket::send;
 use async_trait::async_trait;
 use futures_util::stream::SplitSink;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -84,14 +84,14 @@ impl<T: BrokerStatic> ANSMM<T> {
         println!("[{}] Creating orders...", self.pair);
 
         let (reserve_price, optimal_spread) = self.get_ans_params().await;
-        let bid_price = self.round_price(reserve_price * (1.0 - optimal_spread / 2.0));
-        let ask_price = self.round_price(reserve_price * (1.0 + optimal_spread / 2.0));
+        let _bid_price = self.round_price(reserve_price * (1.0 - optimal_spread / 2.0));
+        let _ask_price = self.round_price(reserve_price * (1.0 + optimal_spread / 2.0));
 
-        let bid_size = self.get_bid_size();
-        let ask_size = self.get_ask_size();
+        let _bid_size = self.get_bid_size();
+        let _ask_size = self.get_ask_size();
 
         // Borrows self as mut
-        let mut priv_sink = &self.priv_sink;
+        let _priv_sink = &self.priv_sink;
 
         // if !ANSMM::<T>::similar_order_exists("buy", bid_price, &self.bid_orders) {
         // let message = json!(
@@ -285,17 +285,17 @@ impl<T: BrokerStatic> Strategy for ANSMM<T> {
     async fn on_data(&self, data: MarketData) {
         println!("on_data() called {:?}", data);
         match data {
-            MarketData::OHLC(ohlc) => {}
-            MarketData::Trade(trade) => {}
+            MarketData::OHLC(_ohlc) => {}
+            MarketData::Trade(_trade) => {}
         }
     }
 
     async fn on_order(&self, order: OrderStatus) {
         println!("on_order() finished {:?}", order);
         match order {
-            OrderStatus::Opened(opened) => {}
-            OrderStatus::Filled(filled) => {}
-            OrderStatus::Cancelled(cancelled) => {}
+            OrderStatus::Opened(_opened) => {}
+            OrderStatus::Filled(_filled) => {}
+            OrderStatus::Cancelled(_cancelled) => {}
         }
     }
 }

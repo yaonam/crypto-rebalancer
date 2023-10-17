@@ -2,27 +2,27 @@ mod kraken_msgs;
 use self::kraken_msgs::{KrakenPublicData, KrakenPublicMessage};
 use super::broker_trait::{Broker, BrokerStatic};
 use crate::schema::{
-    deserialize_data, deserialize_order, LimitOrder, MarketData, OHLCData, OrderBookData,
+    deserialize_order, LimitOrder, MarketData, OHLCData, OrderBookData,
     OrderData, TradeData,
 };
 use crate::strategy::Strategy;
 use crate::websocket::connect;
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
-use futures_util::stream::{SelectAll, SplitSink, SplitStream};
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use reqwest::header;
 use serde_json::json;
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::HashMap;
+
 use std::sync::Arc;
 use std::{str, time};
 use tokio::net::TcpStream;
 use tokio::select;
-use tokio::sync::Mutex;
-use tokio_tungstenite::tungstenite::{Error, Message};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+
+use tokio_tungstenite::tungstenite::{Message};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 const BASE_URL: &str = "https://api.kraken.com";
 const WS_URL: &str = "wss://ws.kraken.com";
@@ -332,5 +332,5 @@ impl BrokerStatic for KrakenStatic {
         priv_sink.send(Message::Text(message)).await.unwrap();
     }
 
-    async fn cancel_order(order: LimitOrder) {}
+    async fn cancel_order(_order: LimitOrder) {}
 }

@@ -1,14 +1,14 @@
 use crate::schema::LimitOrder;
-use crate::schema::MarketData;
+
 use crate::schema::OrderBookData;
 use crate::strategy::Strategy;
 use async_trait::async_trait;
-use futures_util::stream::{SelectAll, SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
-use std::sync::Arc;
+use futures_util::stream::{SplitSink};
+
+
 use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::{Error, Message};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::{Message};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 

@@ -1,12 +1,12 @@
-use base64::{engine::general_purpose, Engine as _};
-use hmac::{Hmac, Mac};
-use reqwest::header;
-use serde_urlencoded;
-use sha2::{Digest, Sha256, Sha512};
+
+use hmac::{Mac};
+
+
+use sha2::{Digest};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::{str, time};
-use tokio::sync::Mutex;
+
+
+
 
 pub struct Portfolio {
     assets: HashMap<String, (f64, f64)>, // (amount, price)

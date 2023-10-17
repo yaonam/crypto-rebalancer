@@ -20,22 +20,23 @@ async fn main() {
         std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
     )
     .await;
-    let strat = ANSMM::new(
+    println!("Broker initialized");
+    ANSMM::new(
         vec!["ETH/USD".to_string()],
         Arc::new(broker_static),
         &mut broker,
     )
     .await;
-    // let task = tokio::spawn(async move {
-    //     let _ = broker.start();
-    // });
+    println!("Strat initialized");
     let task = tokio::spawn(async move {
-        let _ = broker.start();
+        let _ = broker.start().await;
     });
+    println!("Task spawned");
     let _ = tokio::select! {
         _ = task => (),
         _ = ctrl_c() => (), // Graceful shutdown
     };
+    println!("Exited somehow?");
 
     // let signer = Arc::new(Mutex::new(
     //     Signer::new(

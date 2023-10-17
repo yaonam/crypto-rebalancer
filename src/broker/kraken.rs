@@ -1,5 +1,10 @@
+mod kraken_msgs;
+use self::kraken_msgs::{KrakenPublicData, KrakenPublicMessage};
 use super::broker_trait::{Broker, BrokerStatic};
-use crate::schema::{deserialize_data, deserialize_order, LimitOrder, OrderBookData, OrderData};
+use crate::schema::{
+    deserialize_data, deserialize_order, LimitOrder, MarketData, OHLCData, OrderBookData,
+    OrderData, TradeData,
+};
 use crate::strategy::Strategy;
 use crate::websocket::connect;
 use async_trait::async_trait;
@@ -32,7 +37,7 @@ pub struct Kraken<T: Strategy> {
     client: reqwest::Client,
     pub_reader: Option<SplitStream<Socket>>,
     priv_reader: Option<SplitStream<Socket>>,
-    strat: Option<T>,
+    strat: Option<Arc<T>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -149,10 +154,41 @@ impl<T: Strategy> Kraken<T> {
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         json["result"].clone()
     }
+
+    fn deserialize_data(s: &str) -> MarketData {
+        match serde_json::from_str::<KrakenPublicMessage>(s) {
+            Ok(msg) => match msg.data {
+                KrakenPublicData::OHLC(ohlc) => MarketData::OHLC(OHLCData {
+                    open: ohlc.open.parse().unwrap(),
+                    high: ohlc.high.parse().unwrap(),
+                    low: ohlc.low.parse().unwrap(),
+                    close: ohlc.close.parse().unwrap(),
+                    volume: ohlc.volume.parse().unwrap(),
+                    time: ohlc.time,
+                }),
+                KrakenPublicData::Trade(trade) => MarketData::Trade(TradeData {
+                    price: trade.price.parse().unwrap(),
+                    volume: trade.volume.parse().unwrap(),
+                    time: trade.time,
+                }),
+            },
+            Err(e) => {
+                println!("{}: {}", e, s);
+                MarketData::OHLC(OHLCData {
+                    open: 0.0,
+                    high: 0.0,
+                    low: 0.0,
+                    close: 0.0,
+                    volume: 0.0,
+                    time: "0.0".to_string(),
+                })
+            }
+        }
+    }
 }
 
 #[async_trait]
-impl<T: Strategy> Broker for Kraken<T> {
+impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
     async fn connect(
         &mut self,
         symbols: Vec<String>,
@@ -161,20 +197,21 @@ impl<T: Strategy> Broker for Kraken<T> {
         SplitSink<Socket, Message>,
         String,
     ) {
-        let (mut pub_sink, mut pub_reader) = connect(WS_URL).await.unwrap();
-        let (mut priv_sink, mut priv_reader) = connect(WS_AUTH_URL).await.unwrap();
+        let (mut pub_sink, pub_reader) = connect(WS_URL).await.unwrap();
+        let (mut priv_sink, priv_reader) = connect(WS_AUTH_URL).await.unwrap();
 
         self.pub_reader = Some(pub_reader);
         self.priv_reader = Some(priv_reader);
 
-        // Sub to tickers
+        // Sub to ohlc
         for symbol in symbols {
             let message = json!(
             {
                 "event": "subscribe",
                 "pair": [symbol],
                 "subscription": {
-                    "name": "ticker"
+                    "interval": 5,
+                    "name": "ohlc"
                 }
             })
             .to_string();
@@ -198,20 +235,28 @@ impl<T: Strategy> Broker for Kraken<T> {
         (pub_sink, priv_sink, token)
     }
 
+    fn set_strat(&mut self, strat: T) {
+        self.strat = Some(Arc::new(strat));
+    }
+
     async fn start(&mut self) {
+        let strat = self.strat.as_ref().unwrap().clone();
         loop {
             select! {
                 pub_msg = self.pub_reader.as_mut().unwrap().next() => {
                     if let Some(Ok(Message::Text(data))) = pub_msg {
                         // TODO: convert kraken data to generic data
-                        self.strat.as_mut().unwrap().on_data(deserialize_data(data)).await;
+                        let deserialized = Kraken::<T>::deserialize_data(&data);
+                        let strat_clone = strat.clone();
+                        tokio::spawn(async move {strat_clone.on_data(deserialized).await});
                     } else {
                         println!("Error: {:?}", pub_msg);
                     }
                 },
                 priv_msg = self.priv_reader.as_mut().unwrap().next() => {
                     if let Some(Ok(Message::Text(order))) = priv_msg {
-                        self.strat.as_mut().unwrap().on_order(deserialize_order(order)).await;
+                        let strat_clone = strat.clone();
+                        tokio::spawn(async move {strat_clone.on_order(deserialize_order(order)).await});
                     } else {
                         println!("Error: {:?}", priv_msg);
                     }

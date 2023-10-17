@@ -5,6 +5,7 @@ use crate::strategy::Strategy;
 use async_trait::async_trait;
 use futures_util::stream::{SelectAll, SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{Error, Message};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -12,7 +13,7 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[async_trait]
-pub trait Broker {
+pub trait Broker<T: Strategy> {
     async fn connect(
         &mut self,
         symbols: Vec<String>,
@@ -21,6 +22,8 @@ pub trait Broker {
         SplitSink<Socket, Message>,
         String,
     );
+
+    fn set_strat(&mut self, strat: T);
 
     async fn start(&mut self);
 }

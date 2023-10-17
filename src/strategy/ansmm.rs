@@ -52,14 +52,10 @@ pub struct ANSMM<T: BrokerStatic> {
 }
 
 impl<T: BrokerStatic> ANSMM<T> {
-    pub async fn new<U: Broker>(
-        symbols: Vec<String>,
-        broker_static: Arc<T>,
-        broker: &mut U,
-    ) -> Self {
+    pub async fn new<U: Broker<Self>>(symbols: Vec<String>, broker_static: Arc<T>, broker: &mut U) {
         let (pub_sink, priv_sink, token) = broker.connect(symbols).await;
 
-        ANSMM {
+        let strat = ANSMM {
             pair: String::new(),
             decimals: DECIMALS,
 
@@ -78,7 +74,9 @@ impl<T: BrokerStatic> ANSMM<T> {
             token,
             pub_sink,
             priv_sink,
-        }
+        };
+
+        let _ = broker.set_strat(strat);
     }
 
     async fn create_orders(&mut self) {
@@ -284,6 +282,7 @@ impl<T: BrokerStatic> ANSMM<T> {
 #[async_trait]
 impl<T: BrokerStatic> Strategy for ANSMM<T> {
     async fn on_data(&self, data: MarketData) {
+        println!("Got to on_data()");
         match data {
             MarketData::OHLC(ohlc) => {}
             MarketData::Trade(trade) => {}
@@ -291,6 +290,7 @@ impl<T: BrokerStatic> Strategy for ANSMM<T> {
     }
 
     async fn on_order(&self, order: OrderStatus) {
+        println!("Got to on_order()");
         match order {
             OrderStatus::Opened(opened) => {}
             OrderStatus::Filled(filled) => {}

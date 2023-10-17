@@ -1,7 +1,6 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::fmt;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
@@ -113,9 +112,36 @@ pub struct OrderCancelled {
 }
 
 pub fn deserialize_data(data: String) -> MarketData {
-    serde_json::from_str(&data).unwrap()
+    match serde_json::from_str(&data) {
+        Ok(T) => T,
+        Err(e) => {
+            println!("{}: {}", e, data);
+            MarketData::OHLC(OHLCData {
+                open: 0.0,
+                high: 0.0,
+                low: 0.0,
+                close: 0.0,
+                volume: 0.0,
+                time: "0.0".to_string(),
+            })
+        }
+    }
 }
 
 pub fn deserialize_order(data: String) -> OrderStatus {
-    serde_json::from_str(&data).unwrap()
+    match serde_json::from_str(&data) {
+        Ok(T) => T,
+        Err(e) => {
+            println!("{}: {}", e, data);
+            OrderStatus::Opened(OrderOpened {
+                id: "0.0".to_string(),
+                asset: "0.0".to_string(),
+                volume: 0.0,
+                price: 0.0,
+                status: "0.0".to_string(),
+                side: OrderSide::BUY,
+                time: "0.0".to_string(),
+            })
+        }
+    }
 }

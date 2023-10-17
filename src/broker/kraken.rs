@@ -1,9 +1,9 @@
 mod kraken_msgs;
-use self::kraken_msgs::{KrakenPublicData, KrakenPublicMessage};
+use self::kraken_msgs::{KrakenOpenOrders, KrakenPublicData, KrakenPublicMessage};
 use super::broker_trait::{Broker, BrokerStatic};
 use crate::schema::{
-    deserialize_order, LimitOrder, MarketData, OHLCData, OrderBookData,
-    OrderData, TradeData,
+    deserialize_order, LimitOrder, MarketData, OHLCData, OrderBookData, OrderData, OrderOpened,
+    OrderSide, OrderStatus, TradeData,
 };
 use crate::strategy::Strategy;
 use crate::websocket::connect;
@@ -21,7 +21,7 @@ use std::{str, time};
 use tokio::net::TcpStream;
 use tokio::select;
 
-use tokio_tungstenite::tungstenite::{Message};
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 const BASE_URL: &str = "https://api.kraken.com";
@@ -155,38 +155,56 @@ impl<T: Strategy> Kraken<T> {
         json["result"].clone()
     }
 
-    fn deserialize_data(s: &str) -> MarketData {
-        match serde_json::from_str::<KrakenPublicMessage>(s) {
-            Ok(msg) => match msg.data {
-                KrakenPublicData::OHLC(ohlc) => MarketData::OHLC(OHLCData {
-                    pair: msg.pair,
-                    open: ohlc.open.parse().unwrap(),
-                    high: ohlc.high.parse().unwrap(),
-                    low: ohlc.low.parse().unwrap(),
-                    close: ohlc.close.parse().unwrap(),
-                    volume: ohlc.volume.parse().unwrap(),
-                    time: ohlc.time,
-                }),
-                KrakenPublicData::Trade(trade) => MarketData::Trade(TradeData {
-                    pair: msg.pair,
-                    price: trade.price.parse().unwrap(),
-                    volume: trade.volume.parse().unwrap(),
-                    time: trade.time,
-                }),
-            },
-            Err(e) => {
-                println!("{}: {}", e, s);
-                MarketData::OHLC(OHLCData {
-                    pair: String::new(),
-                    open: 0.0,
-                    high: 0.0,
-                    low: 0.0,
-                    close: 0.0,
-                    volume: 0.0,
-                    time: "0.0".to_string(),
-                })
+    fn deserialize_data(s: &str) -> Result<Vec<MarketData>, serde_json::Error> {
+        let msg = serde_json::from_str::<KrakenPublicMessage>(s)?;
+        match msg.data {
+            KrakenPublicData::OHLC(ohlc) => Ok(vec![MarketData::OHLC(OHLCData {
+                pair: msg.pair,
+                open: ohlc.open.parse().unwrap(),
+                high: ohlc.high.parse().unwrap(),
+                low: ohlc.low.parse().unwrap(),
+                close: ohlc.close.parse().unwrap(),
+                volume: ohlc.volume.parse().unwrap(),
+                time: ohlc.time,
+            })]),
+            KrakenPublicData::Trade(trades) => Ok({
+                let mut result = vec![];
+                for trade in trades {
+                    result.push(MarketData::Trade(TradeData {
+                        pair: msg.pair.clone(),
+                        price: trade.price.parse().unwrap(),
+                        volume: trade.volume.parse().unwrap(),
+                        time: trade.time,
+                    }))
+                }
+                result
+            }),
+        }
+    }
+
+    fn deserialize_order(s: &str) -> Result<Vec<OrderStatus>, serde_json::Error> {
+        let msg = serde_json::from_str::<KrakenOpenOrders>(s)?;
+        let mut result: Vec<OrderStatus> = vec![];
+        for order in msg.orders {
+            for (order_id, order_data) in order {
+                match order_data.status.as_str() {
+                    "open" => {
+                        let descr = order_data.descr.unwrap();
+                        result.push(OrderStatus::Opened(OrderOpened {
+                            id: order_id,
+                            pair: descr.pair,
+                            volume: order_data.vol.unwrap_or_default().parse().unwrap(),
+                            price: descr.price.parse().unwrap(),
+                            status: "open".to_string(),
+                            side: OrderSide::BUY,
+                            time: String::new(),
+                        }))
+                    }
+                    _ => {}
+                }
             }
         }
+        Ok(result)
     }
 }
 
@@ -214,6 +232,18 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
             "subscription": {
                 "interval": 5,
                 "name": "ohlc"
+            }
+        })
+        .to_string();
+        pub_sink.send(Message::Text(message)).await.unwrap();
+
+        // Sub to trades
+        let message = json!(
+        {
+            "event": "subscribe",
+            "pair": symbols,
+            "subscription": {
+                "name": "trade"
             }
         })
         .to_string();
@@ -249,9 +279,14 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
                         if data == r#"{"event":"heartbeat"}"# {
                             continue
                         }
-                        let deserialized = Kraken::<T>::deserialize_data(&data);
-                        let strat_clone = strat.clone();
-                        tokio::spawn(async move {strat_clone.on_data(deserialized).await});
+                        if let Ok(deserialized_data) = Kraken::<T>::deserialize_data(&data) {
+                            for deserialized in deserialized_data{
+                                let strat_clone = strat.clone();
+                                tokio::spawn(async move {strat_clone.on_data(deserialized).await});
+                            }
+                        } else {
+                            println!("Error deserializing public: {}", data);
+                        }
                     } else {
                         println!("Error: {:?}", pub_msg);
                     }
@@ -261,8 +296,12 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
                         if order == r#"{"event":"heartbeat"}"# {
                             continue
                         }
-                        let strat_clone = strat.clone();
-                        tokio::spawn(async move {strat_clone.on_order(deserialize_order(order)).await});
+                        if let Ok(deserialized_orders) = Kraken::<T>::deserialize_order(&order) {
+                            for deserialized in deserialized_orders {
+                                let strat_clone = strat.clone();
+                                tokio::spawn(async move {strat_clone.on_order(deserialized).await});
+                            }
+                        }
                     } else {
                         println!("Error: {:?}", priv_msg);
                     }
@@ -321,7 +360,7 @@ impl BrokerStatic for KrakenStatic {
             {
                 "event": "addOrder",
                 "ordertype": "limit",
-                "pair": order.asset,
+                "pair": order.pair,
                 "price": order.price,
                 "token": token,
                 "type": order.side,

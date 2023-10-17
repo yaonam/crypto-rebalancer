@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -42,7 +44,7 @@ pub struct KrakenTradeData {
 pub enum KrakenPublicData {
     // Ticker(KrakenTickerData),
     OHLC(KrakenOHLCData),
-    Trade(KrakenTradeData),
+    Trade(Vec<KrakenTradeData>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -51,4 +53,50 @@ pub struct KrakenPublicMessage {
     pub data: KrakenPublicData,
     pub channel_name: String,
     pub pair: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KrakenOrderDataDescr {
+    pub pair: String,
+    // position
+    #[serde(rename = "type")]
+    pub _type: String,
+    pub ordertype: String,
+    pub price: String,
+    pub price2: String,
+    // leverage: String,
+    pub order: String,
+    // close
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KrakenOrderData {
+    // refid: Option<String>,
+    // userref: i64,
+    pub status: String,
+    // opentm: f64,
+    // starttm: f64,
+    // display_volume: f64,
+    // display_volume_remain: f64,
+    // expiretm: f64,
+    // Ignore contingent for now
+    pub descr: Option<KrakenOrderDataDescr>,
+    pub vol: Option<String>,
+    pub vol_exec: Option<String>,
+    pub cost: Option<String>,
+    pub fee: Option<String>,
+    pub avg_price: Option<String>,
+    // ...
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KrakenSequence {
+    sequence: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KrakenOpenOrders {
+    pub orders: Vec<HashMap<String, KrakenOrderData>>,
+    pub channel_name: String,
+    pub sequence: KrakenSequence,
 }

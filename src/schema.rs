@@ -50,7 +50,7 @@ pub struct OrderBookData {
 
 pub struct LimitOrder {
     pub id: String,
-    pub asset: String,
+    pub pair: String,
     pub volume: f64,
     pub price: f64,
     pub side: OrderSide,
@@ -83,7 +83,7 @@ impl fmt::Display for OrderSide {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderOpened {
     pub id: String,
-    pub asset: String,
+    pub pair: String,
     pub volume: f64,
     pub price: f64,
     pub status: String,
@@ -138,7 +138,7 @@ pub fn deserialize_order(data: String) -> OrderStatus {
             println!("{}: {}", e, data);
             OrderStatus::Opened(OrderOpened {
                 id: "0.0".to_string(),
-                asset: "0.0".to_string(),
+                pair: "0.0".to_string(),
                 volume: 0.0,
                 price: 0.0,
                 status: "0.0".to_string(),

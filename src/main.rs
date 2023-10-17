@@ -1,14 +1,12 @@
 use dotenv::dotenv;
-use rebalancer::account::{Portfolio, Signer};
+
 use rebalancer::broker::broker_trait::Broker;
 use rebalancer::{
     broker::{Kraken, KrakenStatic},
     strategy::ANSMM,
-    task,
 };
 use std::sync::Arc;
 use tokio::signal::ctrl_c;
-use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {

@@ -3,11 +3,10 @@ use crate::schema::LimitOrder;
 use crate::schema::OrderBookData;
 use crate::strategy::Strategy;
 use async_trait::async_trait;
-use futures_util::stream::{SplitSink};
-
+use futures::stream::SplitSink;
 
 use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::{Message};
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;

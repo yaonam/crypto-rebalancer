@@ -34,10 +34,6 @@ pub trait BrokerStatic: Sync + Send {
     where
         Self: Sized;
 
-    async fn get_assets() -> f64
-    where
-        Self: Sized;
-
     async fn place_order(
         priv_sink: &mut SplitSink<Socket, Message>,
         order: LimitOrder,

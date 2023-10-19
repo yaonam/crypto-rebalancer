@@ -27,7 +27,7 @@ const UPDATE_PRICE_THRESHOLD: f64 = 0.0001;
 
 const DECIMALS: u8 = 99;
 
-pub struct ANSMM<T: BrokerStatic> {
+pub struct ANSMM {
     // Constants
     pair: String,
     decimals: u8,
@@ -46,15 +46,16 @@ pub struct ANSMM<T: BrokerStatic> {
     ask_orders: HashMap<String, OrderOpened>,
 
     // Broker
-    broker_static: Arc<T>,
     token: String, // Access token
     pub_sink: SplitSink<Socket, Message>,
     priv_sink: SplitSink<Socket, Message>,
 }
 
-impl<T: BrokerStatic> ANSMM<T> {
-    pub async fn new<U: Broker<Self>>(symbols: Vec<&str>, broker_static: Arc<T>, broker: &mut U) {
+impl ANSMM {
+    pub async fn new<T: Broker<Self>, U: BrokerStatic>(symbols: Vec<&str>, broker: &mut T) {
         let (pub_sink, priv_sink, token) = broker.connect(symbols).await;
+
+        let portfolio = Portfolio::new();
 
         let strat = ANSMM {
             pair: String::new(),
@@ -71,7 +72,6 @@ impl<T: BrokerStatic> ANSMM<T> {
             bid_orders: HashMap::new(),
             ask_orders: HashMap::new(),
 
-            broker_static,
             token,
             pub_sink,
             priv_sink,
@@ -281,7 +281,7 @@ impl<T: BrokerStatic> ANSMM<T> {
 }
 
 #[async_trait]
-impl<T: BrokerStatic> Strategy for ANSMM<T> {
+impl Strategy for ANSMM {
     async fn on_data(&self, data: MarketData) {
         println!("on_data() called {:?}", data);
         match data {

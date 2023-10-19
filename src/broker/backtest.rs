@@ -23,8 +23,8 @@ impl<T: Strategy> Broker<T> for Backtest {
         SplitSink<Socket, Message>,
         String,
     ) {
-        let (mut pub_sink1, _) = connect(WS_URL).await.unwrap();
-        let (mut pub_sink2, _) = connect(WS_URL).await.unwrap();
+        let (pub_sink1, _) = connect(WS_URL).await.unwrap();
+        let (pub_sink2, _) = connect(WS_URL).await.unwrap();
         (pub_sink1, pub_sink2, "".to_string())
     }
 

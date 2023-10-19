@@ -263,6 +263,9 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
         .to_string();
         priv_sink.send(Message::Text(message)).await.unwrap();
 
+        // Get account balances
+        let balances = self.get_account_balances().await;
+
         (pub_sink, priv_sink, token)
     }
 
@@ -345,10 +348,6 @@ impl BrokerStatic for KrakenStatic {
             .map(|(price, volume, _)| OrderData { price, volume })
             .collect();
         OrderBookData { asks, bids }
-    }
-
-    async fn get_assets() -> f64 {
-        0.0
     }
 
     async fn place_order(

@@ -1,6 +1,6 @@
 use dotenv::dotenv;
 
-use rebalancer::broker::backtest::BacktestStatic;
+use rebalancer::broker::backtest::{BacktestPortfolio, BacktestStatic};
 use rebalancer::broker::broker_trait::{Broker, BrokerStatic};
 use rebalancer::broker::Backtest;
 use rebalancer::{
@@ -22,6 +22,10 @@ async fn main() {
     // println!("Broker initialized");
     // ANSMM::new::<_, KrakenStatic>(vec!["ETH/USD", "STORJ/USD"], &mut broker).await;
 
+    let mut broker_portoflio = BacktestPortfolio::new().await;
+    tokio::spawn(async move {
+        broker_portoflio.start().await;
+    });
     let mut broker = Backtest::new().await;
     println!("Broker initialized");
     ANSMM::new::<_, BacktestStatic>(vec!["ETH/USD"], &mut broker).await;

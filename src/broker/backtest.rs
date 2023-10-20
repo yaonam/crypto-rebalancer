@@ -69,7 +69,7 @@ impl BacktestPortfolio {
 
         // Pub stream
         let (pub_stream, _) = self.listener.accept().await.unwrap();
-        let mut pub_ws = accept_async(pub_stream).await.unwrap();
+        let _pub_ws = accept_async(pub_stream).await.unwrap();
 
         // Priv stream
         let (priv_stream, _) = self.listener.accept().await.unwrap();
@@ -78,12 +78,12 @@ impl BacktestPortfolio {
             let msg = msg.unwrap();
             let s = msg.to_text().unwrap();
             match serde_json::from_str::<BacktestMsg>(s).unwrap() {
-                BacktestMsg::Init(symbols) => {}
+                BacktestMsg::Init(_symbols) => {}
             }
         }
     }
 
-    fn init(&mut self, symbols: Vec<String>) {}
+    fn init(&mut self, _symbols: Vec<String>) {}
 }
 
 pub struct Backtest<T: Strategy> {
@@ -120,7 +120,7 @@ impl<T: Strategy> Broker<T> for Backtest<T> {
         (pub_sink, priv_sink, String::new())
     }
 
-    fn set_strat(&mut self, strat: T) {}
+    fn set_strat(&mut self, _strat: T) {}
 
     async fn start(&mut self) {}
 }
@@ -129,16 +129,16 @@ pub struct BacktestStatic {}
 
 #[async_trait]
 impl BrokerStatic for BacktestStatic {
-    async fn get_mid_price(client: reqwest::Client, symbol: String) -> f64 {
+    async fn get_mid_price(_client: reqwest::Client, _symbol: String) -> f64 {
         0.0
     }
 
     async fn place_order(
-        priv_sink: &mut SplitSink<Socket, Message>,
-        order: LimitOrder,
-        token: String,
+        _priv_sink: &mut SplitSink<Socket, Message>,
+        _order: LimitOrder,
+        _token: String,
     ) {
     }
 
-    async fn cancel_order(order: LimitOrder) {}
+    async fn cancel_order(_order: LimitOrder) {}
 }

@@ -2,7 +2,7 @@ mod kraken_msgs;
 use self::kraken_msgs::{KrakenOpenOrders, KrakenPublicData, KrakenPublicMessage};
 use super::broker_trait::{Broker, BrokerStatic};
 use crate::schema::{
-    deserialize_order, LimitOrder, MarketData, OHLCData, OrderBookData, OrderData, OrderOpened,
+    LimitOrder, MarketData, OHLCData, OrderOpened,
     OrderSide, OrderStatus, TradeData,
 };
 use crate::strategy::Strategy;
@@ -264,7 +264,7 @@ impl<T: Strategy + 'static> Broker<T> for Kraken<T> {
         priv_sink.send(Message::Text(message)).await.unwrap();
 
         // Get account balances
-        let balances = self.get_account_balances().await;
+        let _balances = self.get_account_balances().await;
 
         (pub_sink, priv_sink, token)
     }

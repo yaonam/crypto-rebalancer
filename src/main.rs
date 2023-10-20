@@ -1,13 +1,12 @@
 use dotenv::dotenv;
 
 use rebalancer::broker::backtest::{BacktestPortfolio, BacktestStatic};
-use rebalancer::broker::broker_trait::{Broker, BrokerStatic};
+use rebalancer::broker::broker_trait::{Broker};
 use rebalancer::broker::Backtest;
 use rebalancer::{
-    broker::{Kraken, KrakenStatic},
     strategy::ANSMM,
 };
-use std::sync::Arc;
+
 use tokio::signal::ctrl_c;
 
 #[tokio::main]

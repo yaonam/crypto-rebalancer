@@ -324,8 +324,8 @@ impl KrakenStatic {
 
 #[async_trait]
 impl BrokerStatic for KrakenStatic {
-    async fn get_order_book(client: reqwest::Client, symbol: String) -> OrderBookData {
-        const PATH: &str = "/0/public/Depth?pair=";
+    async fn get_mid_price(client: reqwest::Client, symbol: String) -> f64 {
+        const PATH: &str = "/0/public/Depth?count=1&pair=";
 
         let response = client
             .get(format!("{}{}{}", BASE_URL, PATH, symbol).as_str())
@@ -337,17 +337,22 @@ impl BrokerStatic for KrakenStatic {
 
         let order_book: KrakenOrderBook = serde_json::from_str(&body).unwrap();
 
-        let asks: Vec<OrderData> = order_book
-            .asks
-            .into_iter()
-            .map(|(price, volume, _)| OrderData { price, volume })
-            .collect();
-        let bids = order_book
-            .bids
-            .into_iter()
-            .map(|(price, volume, _)| OrderData { price, volume })
-            .collect();
-        OrderBookData { asks, bids }
+        // let asks: Vec<OrderData> = order_book
+        //     .asks
+        //     .into_iter()
+        //     .map(|(price, volume, _)| OrderData { price, volume })
+        //     .collect();
+        // let bids = order_book
+        //     .bids
+        //     .into_iter()
+        //     .map(|(price, volume, _)| OrderData { price, volume })
+        //     .collect();
+        // OrderBookData { asks, bids }
+
+        let ask_price = order_book.asks[0].0;
+        let bid_price = order_book.bids[0].0;
+
+        ask_price + bid_price / 2.0
     }
 
     async fn place_order(

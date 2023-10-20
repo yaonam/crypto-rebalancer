@@ -1,6 +1,8 @@
 use dotenv::dotenv;
 
+use rebalancer::broker::backtest::BacktestStatic;
 use rebalancer::broker::broker_trait::{Broker, BrokerStatic};
+use rebalancer::broker::Backtest;
 use rebalancer::{
     broker::{Kraken, KrakenStatic},
     strategy::ANSMM,
@@ -12,17 +14,21 @@ use tokio::signal::ctrl_c;
 async fn main() {
     dotenv().ok();
 
-    let broker_static = KrakenStatic::new();
-    let mut broker = Kraken::<ANSMM>::new(
-        std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
-        std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
-    )
-    .await;
+    // let mut broker = Kraken::<ANSMM>::new(
+    //     std::env::var("KRAKEN_KEY").expect("KRAKEN_KEY not set"),
+    //     std::env::var("KRAKEN_SECRET").expect("KRAKEN_SECRET not set"),
+    // )
+    // .await;
+    // println!("Broker initialized");
+    // ANSMM::new::<_, KrakenStatic>(vec!["ETH/USD", "STORJ/USD"], &mut broker).await;
+
+    let mut broker = Backtest::new().await;
     println!("Broker initialized");
-    ANSMM::new::<_, KrakenStatic>(vec!["ETH/USD", "STORJ/USD"], &mut broker).await;
+    ANSMM::new::<_, BacktestStatic>(vec!["ETH/USD"], &mut broker).await;
+
     println!("Strat initialized");
     let task = tokio::spawn(async move {
-        let _ = broker.start().await;
+        broker.start().await;
     });
     println!("Task spawned");
     let _ = tokio::select! {

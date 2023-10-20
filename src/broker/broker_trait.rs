@@ -24,13 +24,14 @@ pub trait Broker<T: Strategy> {
 
     fn set_strat(&mut self, strat: T);
 
+    /// Start listening to and forwarding wss messages.
     async fn start(&mut self);
 }
 
 #[async_trait]
 pub trait BrokerStatic: Sync + Send {
     /// Returns the order book for the given symbol.
-    async fn get_order_book(client: reqwest::Client, symbol: String) -> OrderBookData
+    async fn get_mid_price(client: reqwest::Client, symbol: String) -> f64
     where
         Self: Sized;
 

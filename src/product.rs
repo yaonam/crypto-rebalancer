@@ -16,10 +16,11 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const BUFFER_SIZE: usize = 100; // Number of prices/spreads to keep in memory
 const PRICE_RECORD_INTERVAL: u64 = 60; // seconds
-const ORDER_SIZE_USD: f64 = 20.0;
+const ORDER_SIZE_USD: f64 = 25.0;
 const RISK_AVERSION: f64 = 10.0;
 const MAKER_FEE: f64 = 0.0014;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0001;
+const BASE_VOLATILITY: f64 = 0.0001;
 
 const DECIMALS: u8 = 99;
 
@@ -227,6 +228,7 @@ impl Market {
                 }
             )
             .to_string();
+            println!("Buy: {}", message);
             send(&mut self.priv_sink, &message).await.unwrap();
         }
 
@@ -243,6 +245,7 @@ impl Market {
                 }
             )
             .to_string();
+            println!("Sell: {}", message);
             send(&mut self.priv_sink, &message).await.unwrap();
         }
     }
@@ -273,7 +276,7 @@ impl Market {
     /// Records self.last_price if it has been PRICE_RECORD_INTERVAL seconds since the last recording.
     fn record_price(&mut self) {
         let now = time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-        if now - self.prices_last_updated >= PRICE_RECORD_INTERVAL {
+        if now - self.prices_last_updated >= PRICE_RECORD_INTERVAL && self.last_price != 0.0 {
             self.prices.push_back(self.last_price);
             if self.prices.len() > BUFFER_SIZE {
                 self.prices.pop_front();
@@ -311,6 +314,7 @@ impl Market {
         let s = self.get_last_price();
         let y = RISK_AVERSION;
         let o = self.get_volatility();
+        println!("Target delta: {}", q);
 
         s * (1.0 + 10.0 * (q / q.abs().sqrt()) * y * o.powf(2.0))
     }
@@ -368,7 +372,7 @@ impl Market {
 
         variance /= count;
 
-        variance.sqrt() / self.last_price // Normalize by the last price
+        variance.sqrt() / self.last_price + BASE_VOLATILITY // Normalize by the last price
     }
 
     /// Returns an estimation of the liquidity.

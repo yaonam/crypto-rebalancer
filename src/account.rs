@@ -66,7 +66,11 @@ impl Portfolio {
             amount, price, target, total_value
         );
 
-        (amount * price / total_value - target) * 100.0
+        if amount == 0.0 || price == 0.0 {
+            return 0.0;
+        }
+
+        (target - amount * price / total_value) * 100.0
     }
 
     fn get_asset_allocation(&self, asset: String) -> f64 {
@@ -104,13 +108,16 @@ impl Portfolio {
         }
     }
 
-    pub fn set_pair(&mut self, pair: String, amount: f64, price: f64) {
-        let asset = if let Some(stripped) = pair.strip_suffix("/USD") {
-            stripped.to_string()
+    pub fn set_pair_price(&mut self, pair: String, new_price: f64) {
+        if let Some(stripped) = pair.strip_suffix("/USD") {
+            if let Some((_, price)) = self.assets.get_mut(stripped) {
+                *price = new_price;
+            } else {
+                println!("Asset not found for {}", pair);
+            };
         } else {
-            pair
+            println!("Not /USD pair: {}", pair);
         };
-        self.assets.insert(asset, (amount, price));
     }
 }
 

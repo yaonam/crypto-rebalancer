@@ -20,7 +20,7 @@ const ORDER_SIZE_USD: f64 = 25.0;
 const RISK_AVERSION: f64 = 10.0;
 const MAKER_FEE: f64 = 0.0014;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0001;
-const BASE_VOLATILITY: f64 = 0.0001;
+const BASE_VOLATILITY: f64 = 0.0005;
 
 const DECIMALS: u8 = 99;
 
@@ -84,7 +84,7 @@ impl Market {
                     }
                 },
                 WSPayload::OpenOrders(orders) => self.handle_order_update(orders).await,
-                WSPayload::Heartbeat(_heartbeat) => self.record_price(),
+                WSPayload::Heartbeat(_heartbeat) => self.record_price().await,
                 _ => {
                     println!("[{}] Unhandled message: {:?}", self.pair, data);
                 }
@@ -273,13 +273,17 @@ impl Market {
     }
 
     /// Records self.last_price if it has been PRICE_RECORD_INTERVAL seconds since the last recording.
-    fn record_price(&mut self) {
+    async fn record_price(&mut self) {
         let now = time::UNIX_EPOCH.elapsed().unwrap().as_secs();
         if now - self.prices_last_updated >= PRICE_RECORD_INTERVAL && self.last_price != 0.0 {
             self.prices.push_back(self.last_price);
             if self.prices.len() > BUFFER_SIZE {
                 self.prices.pop_front();
             }
+            {
+                let mut portfolio = self.portfolio.lock().await;
+                portfolio.set_pair_price(self.pair.clone(), self.last_price);
+            };
             self.prices_last_updated = now;
 
             println!("[{}] Recorded new price: {}", self.pair, self.last_price);

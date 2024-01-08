@@ -23,8 +23,17 @@ impl Portfolio {
         for (asset, balance) in balances.as_object().unwrap() {
             let amount = balance.as_str().unwrap().parse::<f64>().unwrap();
             let price = if asset == "ZUSD" { 1.0 } else { 0.0 };
-            assets.insert(asset.clone(), (amount, price));
-            println!("Found {}: {} @ {}", asset, amount, price)
+            println!("Found {}: {} @ {}", asset, amount, price);
+            if amount == 0.0 {
+                continue;
+            }
+            if let Some(stripped) = asset.strip_prefix("X") {
+                println!("Inserting: {}", stripped);
+                assets.insert(stripped.to_string(), (amount, price));
+            } else {
+                println!("Inserting: {}", asset);
+                assets.insert(asset.clone(), (amount, price));
+            }
         }
         Portfolio {
             assets: assets,
@@ -33,7 +42,13 @@ impl Portfolio {
     }
 
     /// Returns a tuple of the amount and price of the asset.
-    pub fn get_asset(&self, asset: String) -> (f64, f64) {
+    pub fn get_pair(&self, pair: String) -> (f64, f64) {
+        let asset = if let Some(stripped) = pair.strip_suffix("/USD") {
+            stripped.to_string()
+        } else {
+            pair
+        };
+        println!("Get Asset: {}", asset);
         match self.assets.get(&asset) {
             Some((amount, price)) => (*amount, *price),
             None => (0.0, 0.0),
@@ -41,17 +56,21 @@ impl Portfolio {
     }
 
     // value/total - target. In percentage.
-    pub fn get_asset_target_delta(&self, asset: String) -> f64 {
-        let (amount, price) = self.get_asset(asset);
+    pub fn get_pair_target_delta(&self, pair: String) -> f64 {
+        let (amount, price) = self.get_pair(pair);
         let total_value = self.get_total_value();
 
         let target = 1.0 / self.assets.len() as f64;
+        println!(
+            "Get Target Delta: {} @ {} to {}% of {}",
+            amount, price, target, total_value
+        );
 
         (amount * price / total_value - target) * 100.0
     }
 
     fn get_asset_allocation(&self, asset: String) -> f64 {
-        let (amount, price) = self.get_asset(asset);
+        let (amount, price) = self.get_pair(asset);
         amount * price / self.get_total_value()
     }
 
@@ -63,7 +82,34 @@ impl Portfolio {
         total
     }
 
-    pub fn set_asset(&mut self, asset: String, amount: f64, price: f64) {
+    pub fn update_pair(&mut self, pair: String, order_vol: f64, order_price: f64) {
+        let asset = if let Some(stripped) = pair.strip_suffix("/USD") {
+            stripped.to_string()
+        } else {
+            pair
+        };
+        println!("Update asset: {}", asset);
+        // Update token
+        if let Some((amount, price)) = self.assets.get_mut(&asset) {
+            *amount = *amount + order_vol;
+            *price = order_price;
+        } else {
+            println!("Asset not found: {}", asset);
+        }
+        // Update USD
+        if let Some((amount, _)) = self.assets.get_mut("ZUSD") {
+            *amount = *amount - (order_vol * order_price);
+        } else {
+            println!("Asset not found: ZUSD");
+        }
+    }
+
+    pub fn set_pair(&mut self, pair: String, amount: f64, price: f64) {
+        let asset = if let Some(stripped) = pair.strip_suffix("/USD") {
+            stripped.to_string()
+        } else {
+            pair
+        };
         self.assets.insert(asset, (amount, price));
     }
 }

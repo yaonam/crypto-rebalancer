@@ -185,20 +185,19 @@ impl Market {
         println!("[{}] Order filled: {:?}", self.pair, order);
 
         let descr = &order.descr.unwrap();
-        let price = descr.price.parse::<f64>().unwrap();
-        self.last_price = price;
+        let order_price = descr.price.parse::<f64>().unwrap();
+        let order_vol = order.vol.unwrap().parse::<f64>().unwrap();
+        self.last_price = order_price;
         self.record_price();
 
         {
             // Update portfolio balances
             let mut portfolio = self.portfolio.lock().await;
-            let (amount, _) = portfolio.get_asset(self.pair.clone());
-            let new_amount: f64 = if descr._type == "buy" {
-                amount + order.vol.unwrap().parse::<f64>().unwrap()
+            if descr._type == "buy" {
+                portfolio.update_pair(self.pair.clone(), order_vol, order_price)
             } else {
-                amount - order.vol.unwrap().parse::<f64>().unwrap()
+                portfolio.update_pair(self.pair.clone(), -order_vol, order_price)
             };
-            portfolio.set_asset(self.pair.clone(), new_amount, price);
         }
 
         self.cancel_orders().await;
@@ -350,7 +349,7 @@ impl Market {
     /// Returns the target delta for the asset. In percentage.
     async fn get_target_delta(&self) -> f64 {
         let portfolio = self.portfolio.lock().await;
-        portfolio.get_asset_target_delta(self.pair.clone())
+        portfolio.get_pair_target_delta(self.pair.clone())
     }
 
     // Returns the standard deviation of the last 100 prices

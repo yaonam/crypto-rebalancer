@@ -31,6 +31,9 @@ async fn main() {
     let pair1 = "ETH/USD".to_string();
     // let pair2 = "STORJ/USD".to_string();
 
+    // Wait a bit for the portfolio to be initialized.
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
     let task1 = task::spawn(pair1, portfolio.clone(), signer.clone()).await;
     // let task2 = task::spawn(pair2, portfolio.clone(), signer.clone()).await;
 

@@ -48,7 +48,6 @@ impl Portfolio {
         } else {
             pair
         };
-        println!("Get Asset: {}", asset);
         match self.assets.get(&asset) {
             Some((amount, price)) => (*amount, *price),
             None => (0.0, 0.0),
@@ -61,10 +60,6 @@ impl Portfolio {
         let total_value = self.get_total_value();
 
         let target = 1.0 / self.assets.len() as f64;
-        println!(
-            "Get Target Delta: {} @ {} to {}% of {}",
-            amount, price, target, total_value
-        );
 
         if amount == 0.0 || price == 0.0 {
             return 0.0;

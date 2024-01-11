@@ -21,6 +21,7 @@ const RISK_AVERSION: f64 = 10.0;
 const MAKER_FEE: f64 = 0.0014;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0005;
 const BASE_VOLATILITY: f64 = 0.0005;
+const ORDER_CREATION_COOLDOWN: u64 = 5; // seconds
 
 const DECIMALS: u8 = 99;
 
@@ -45,6 +46,9 @@ pub struct Market {
     portfolio: Arc<Mutex<Portfolio>>,
     priv_sink: SplitSink<Socket, Message>,
     token: String, // Access token
+
+    // To prevent multiple orders from being placed at the same time
+    last_order_time: u64,
 }
 
 impl Market {
@@ -70,6 +74,8 @@ impl Market {
             portfolio,
             priv_sink,
             token,
+
+            last_order_time: 0,
         }
     }
 
@@ -100,7 +106,7 @@ impl Market {
                     "pending" | "open" => {
                         println!("[{}] Order {}: {}", self.pair, order_data.status, order_id);
                         if order_data.descr.is_none() {
-                            println!("[{}] Order descr is None", self.pair);
+                            // println!("[{}] Order descr is None", self.pair);
                             continue;
                         }
                         if order_data.descr.as_ref().unwrap().pair != self.pair {
@@ -163,7 +169,7 @@ impl Market {
         } else if decimals > self.decimals {
             self.decimals = decimals; // In case prev count had trailing zeros
         }
-        self.record_price();
+        self.record_price().await;
 
         self.vol_24hr = data.v[0].as_str().unwrap().parse::<f64>().unwrap();
 
@@ -171,12 +177,12 @@ impl Market {
 
         let (reserve_price, optimal_spread) = self.get_ans_params().await;
         println!(
-            "Last price: {}, Bid: {}, Ask: {}",
-            self.last_price, bid_price, ask_price
+            "[{}] Last price: {}, Bid: {}, Ask: {}",
+            self.pair, self.last_price, bid_price, ask_price
         );
         println!(
-            "Reserve price: {}, Optimal spread: {}",
-            reserve_price, optimal_spread
+            "[{}] Reserve price: {}, Optimal spread: {}",
+            self.pair, reserve_price, optimal_spread
         );
     }
 
@@ -211,6 +217,14 @@ impl Market {
         if !Market::similar_order_exists("buy", bid_price, &self.bid_orders)
             || !Market::similar_order_exists("sell", ask_price, &self.ask_orders)
         {
+            if self.last_order_time + ORDER_CREATION_COOLDOWN
+                > time::UNIX_EPOCH.elapsed().unwrap().as_secs()
+            {
+                println!("[{}] Order creation blocked by cooldown", self.pair);
+                return;
+            }
+            self.last_order_time = time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+
             self.cancel_orders().await;
 
             let buy_message = json!(
@@ -296,8 +310,6 @@ impl Market {
                 self.spreads.pop_front();
             }
             self.spreads_last_updated = now;
-
-            println!("[{}] Recorded new spread: {}", self.pair, spread);
         }
     }
 
@@ -313,7 +325,7 @@ impl Market {
         let s = self.get_last_price();
         let y = RISK_AVERSION;
         let o = self.get_volatility();
-        println!("Target delta: {}", q);
+        println!("[{}] Target delta: {}", self.pair, q);
 
         s * (1.0 + 10.0 * (q / q.abs().sqrt()) * y * o.powf(2.0))
     }
@@ -329,7 +341,7 @@ impl Market {
             spread = MAKER_FEE;
         }
 
-        println!("Spread: {}, Volatility: {}", spread, o);
+        println!("[{}] Spread: {}, Volatility: {}", self.pair, spread, o);
 
         spread + 2.0 * (reserve_price / self.last_price - 1.0).abs()
     }
@@ -386,7 +398,6 @@ impl Market {
     }
 
     fn similar_order_exists(_type: &str, price: f64, orders: &HashMap<String, OrderData>) -> bool {
-        println!("---------{}-------------", orders.len());
         for (_, order) in orders {
             if order.descr.is_none() {
                 continue;

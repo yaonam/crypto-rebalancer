@@ -174,16 +174,6 @@ impl Market {
         self.vol_24hr = data.v[0].as_str().unwrap().parse::<f64>().unwrap();
 
         self.refresh_orders().await;
-
-        let (reserve_price, optimal_spread) = self.get_ans_params().await;
-        println!(
-            "[{}] Last price: {}, Bid: {}, Ask: {}",
-            self.pair, self.last_price, bid_price, ask_price
-        );
-        println!(
-            "[{}] Reserve price: {}, Optimal spread: {}",
-            self.pair, reserve_price, optimal_spread
-        );
     }
 
     async fn on_order_filled(&mut self, order: OrderData) {
@@ -297,6 +287,11 @@ impl Market {
             self.prices_last_updated = now;
 
             println!("[{}] Recorded new price: {}", self.pair, self.last_price);
+            let (reserve_price, optimal_spread) = self.get_ans_params().await;
+            println!(
+                "[{}] Reserve price: {}, Optimal spread: {}",
+                self.pair, reserve_price, optimal_spread
+            );
         }
     }
 
@@ -314,25 +309,24 @@ impl Market {
     }
 
     async fn get_ans_params(&mut self) -> (f64, f64) {
-        let reserve_price = self.get_reserve_price().await;
-        let optimal_spread = self.get_optimal_spread(reserve_price);
+        let volatility = self.get_volatility();
+        let reserve_price = self.get_reserve_price(volatility).await;
+        let optimal_spread = self.get_optimal_spread(reserve_price, volatility);
 
         (reserve_price, optimal_spread)
     }
 
-    async fn get_reserve_price(&self) -> f64 {
+    async fn get_reserve_price(&self, o: f64) -> f64 {
         let q = self.get_target_delta().await;
         let s = self.get_last_price();
         let y = RISK_AVERSION;
-        let o = self.get_volatility();
-        println!("[{}] Target delta: {}", self.pair, q);
+        // println!("[{}] Target delta: {}", self.pair, q);
 
         s * (1.0 + 10.0 * (q / q.abs().sqrt()) * y * o.powf(2.0))
     }
 
-    fn get_optimal_spread(&mut self, reserve_price: f64) -> f64 {
+    fn get_optimal_spread(&mut self, reserve_price: f64, o: f64) -> f64 {
         let y = RISK_AVERSION;
-        let o = self.get_volatility();
         // let k = self.get_order_depth();
 
         let mut spread = y * o.powf(2.0) + (1.0 + y / 50.0).ln() / 2000.0;
@@ -342,7 +336,7 @@ impl Market {
             spread = MIN_SPREAD;
         }
 
-        println!("[{}] Spread: {}, Volatility: {}", self.pair, spread, o);
+        // println!("[{}] Spread: {}, Volatility: {}", self.pair, spread, o);
 
         // Incorporate reserve price so doesn't cross mid price
         spread + 2.0 * (reserve_price / self.last_price - 1.0).abs()
@@ -415,7 +409,7 @@ impl Market {
 }
 
 fn count_decimals(s: &str) -> u8 {
-    println!("Counting decimals for {}", s);
+    // println!("Counting decimals for {}", s);
     if let Some(pos) = s.find('.') {
         s[pos + 1..].len() as u8
     } else {

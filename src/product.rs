@@ -16,7 +16,7 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const BUFFER_SIZE: usize = 100; // Number of prices/spreads to keep in memory
 const PRICE_RECORD_INTERVAL: u64 = 60; // seconds
-const ORDER_SIZE_USD: f64 = 35.0;
+const ORDER_SIZE_USD: f64 = 50.0;
 const RISK_AVERSION: f64 = 10.0;
 const MIN_SPREAD: f64 = 0.0065;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0005;
@@ -95,7 +95,7 @@ impl Market {
                     println!("[{}] Unhandled message: {:?}", self.pair, data);
                 }
             },
-            Err(e) => println!("[{}] Error: {}", self.pair, e),
+            Err(e) => println!("[{}] Error: {}, {}", self.pair, e, message),
         }
     }
 
@@ -104,7 +104,6 @@ impl Market {
             for (order_id, order_data) in order {
                 match order_data.status.as_str() {
                     "pending" | "open" => {
-                        println!("[{}] Order {}: {}", self.pair, order_data.status, order_id);
                         if order_data.descr.is_none() {
                             // println!("[{}] Order descr is None", self.pair);
                             continue;
@@ -112,6 +111,7 @@ impl Market {
                         if order_data.descr.as_ref().unwrap().pair != self.pair {
                             continue;
                         }
+                        println!("[{}] Order {}: {}", self.pair, order_data.status, order_id);
                         match order_data.descr.as_ref().unwrap()._type.as_str() {
                             "buy" => {
                                 if !self.bid_orders.contains_key(&order_id) {

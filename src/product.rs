@@ -18,7 +18,7 @@ const BUFFER_SIZE: usize = 100; // Number of prices/spreads to keep in memory
 const PRICE_RECORD_INTERVAL: u64 = 60; // seconds
 const ORDER_SIZE_USD: f64 = 35.0;
 const RISK_AVERSION: f64 = 10.0;
-const MAKER_FEE: f64 = 0.0014;
+const MIN_SPREAD: f64 = 0.0065;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0005;
 const BASE_VOLATILITY: f64 = 0.0005;
 const ORDER_CREATION_COOLDOWN: u64 = 5; // seconds
@@ -333,16 +333,18 @@ impl Market {
     fn get_optimal_spread(&mut self, reserve_price: f64) -> f64 {
         let y = RISK_AVERSION;
         let o = self.get_volatility();
-        let k = self.get_order_depth();
+        // let k = self.get_order_depth();
 
-        let mut spread = y * o.powf(2.0) + (1.0 + y / k).ln() / 2000.0;
+        let mut spread = y * o.powf(2.0) + (1.0 + y / 50.0).ln() / 2000.0;
+        // let mut spread = y * o.powf(2.0) + (1.0 + y / k).ln() / 2000.0;
 
-        if spread < MAKER_FEE {
-            spread = MAKER_FEE;
+        if spread < MIN_SPREAD {
+            spread = MIN_SPREAD;
         }
 
         println!("[{}] Spread: {}, Volatility: {}", self.pair, spread, o);
 
+        // Incorporate reserve price so doesn't cross mid price
         spread + 2.0 * (reserve_price / self.last_price - 1.0).abs()
     }
 

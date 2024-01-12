@@ -48,8 +48,15 @@ pub async fn listener(
     streams.push(reader2);
 
     let read_future = streams.for_each(|message| async {
-        let data = message.unwrap().to_string();
-        market.lock().await.on_message(data).await;
+        match message {
+            Err(e) => {
+                println!("Error reading from stream: {}", e);
+                return;
+            }
+            Ok(message) => {
+                market.lock().await.on_message(message.to_string()).await;
+            }
+        }
     });
 
     read_future.await;

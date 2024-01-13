@@ -16,12 +16,17 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const BUFFER_SIZE: usize = 100; // Number of prices/spreads to keep in memory
 const PRICE_RECORD_INTERVAL: u64 = 60; // seconds
-const ORDER_SIZE_USD: f64 = 50.0;
+const ORDER_SIZE_USD: f64 = 35.0;
 const RISK_AVERSION: f64 = 5.0;
-const MIN_SPREAD: f64 = 0.0060;
+const FEE: f64 = 0.0016;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0005;
 const BASE_VOLATILITY: f64 = 0.0005;
 const ORDER_CREATION_COOLDOWN: u64 = 5; // seconds
+
+// Ratio for how much mid price updates
+const PRICE_UPDATE_NUMERATOR: f64 = 3.0;
+const PRICE_UPDATE_DENOMINATOR: f64 = 4.0;
+const MIN_SPREAD: f64 = 4.0 * FEE * PRICE_UPDATE_NUMERATOR / PRICE_UPDATE_DENOMINATOR;
 
 const DECIMALS: u8 = 99;
 
@@ -99,7 +104,8 @@ impl Market {
                     println!("[{}] Unhandled message: {:?}", self.pair, data);
                 }
             },
-            Err(e) => println!("[{}] Error: {}, {}", self.pair, e, message),
+            Err(e) => println!("[{}] Error: {}", self.pair, message),
+            // Err(e) => println!("[{}] Error: {}, {}", self.pair, e, message),
         }
     }
 
@@ -145,9 +151,11 @@ impl Market {
                         }
                     }
                     "canceled" => {
-                        println!("[{}] Order cancelled: {}", self.pair, order_id);
-                        self.bid_orders.remove(&order_id);
-                        self.ask_orders.remove(&order_id);
+                        if let Some(_) = self.bid_orders.remove(&order_id) {
+                            println!("[{}] Bid cancelled: {}", self.pair, order_id)
+                        } else if let Some(_) = self.ask_orders.remove(&order_id) {
+                            println!("[{}] Ask cancelled: {}", self.pair, order_id)
+                        }
                     }
                     _ => {
                         println!(
@@ -167,7 +175,7 @@ impl Market {
 
         // Initialize
         let decimals = count_decimals(&bid_price.to_string());
-        if self.last_price == 0.0 {
+        if self.get_last_price() == 0.0 {
             self.last_price = (bid_price + ask_price) / 2.0;
             self.decimals = decimals;
             self.record_traded_price().await;
@@ -186,7 +194,7 @@ impl Market {
         let descr = &order.descr.unwrap();
         let order_price = descr.price.parse::<f64>().unwrap();
         let order_vol = order.vol.unwrap().parse::<f64>().unwrap();
-        self.last_price = order_price;
+        self.set_last_price(order_price);
         self.record_traded_price().await;
 
         {
@@ -272,15 +280,16 @@ impl Market {
     }
 
     async fn record_traded_price(&mut self) {
-        if self.last_price != 0.0 {
+        let last_price = self.get_last_price();
+        if last_price != 0.0 {
             let mut portfolio = self.portfolio.lock().await;
-            portfolio.set_pair_price(self.pair.clone(), self.last_price);
+            portfolio.set_pair_price(self.pair.clone(), last_price);
         };
         self.prices_last_updated = 0;
-        self.record_price(self.last_price).await;
+        self.record_price(last_price).await;
     }
 
-    /// Records self.last_price if it has been PRICE_RECORD_INTERVAL seconds since the last recording.
+    /// Records self.prices if it has been PRICE_RECORD_INTERVAL seconds since the last recording.
     async fn record_price(&mut self, price: f64) {
         let now = time::UNIX_EPOCH.elapsed().unwrap().as_secs();
         if now - self.prices_last_updated >= PRICE_RECORD_INTERVAL && price != 0.0 {
@@ -290,11 +299,13 @@ impl Market {
             }
             self.prices_last_updated = now;
 
-            println!("[{}] Recorded new price: {}", self.pair, price);
+            // println!("[{}] Recorded new price: {}", self.pair, price);
             let (reserve_price, optimal_spread) = self.get_ans_params().await;
             println!(
-                "[{}] Reserve price: {}, Optimal spread: {}",
-                self.pair, reserve_price, optimal_spread
+                "[{}] Price scaling: {}, Optimal spread: {}",
+                self.pair,
+                reserve_price / self.get_last_price() - 1.0,
+                optimal_spread
             );
         }
     }
@@ -343,7 +354,14 @@ impl Market {
         // println!("[{}] Spread: {}, Volatility: {}", self.pair, spread, o);
 
         // Incorporate reserve price so doesn't cross mid price
-        spread + 2.0 * (reserve_price / self.last_price - 1.0).abs()
+        spread + 2.0 * (reserve_price / self.get_last_price() - 1.0).abs()
+    }
+
+    // Set last price to weighted avg of last price and new price
+    fn set_last_price(&mut self, price: f64) {
+        self.last_price = ((PRICE_UPDATE_DENOMINATOR - PRICE_UPDATE_NUMERATOR) * self.last_price
+            + PRICE_UPDATE_NUMERATOR * price)
+            / PRICE_UPDATE_DENOMINATOR;
     }
 
     fn get_last_price(&self) -> f64 {
@@ -383,13 +401,13 @@ impl Market {
 
         variance /= count;
 
-        variance.sqrt() / self.last_price + BASE_VOLATILITY // Normalize by the last price
+        variance.sqrt() / self.get_last_price() + BASE_VOLATILITY // Normalize by the last price
     }
 
     /// Returns an estimation of the liquidity.
     /// sqrt(vol_24hr*avg_spread)
     fn get_order_depth(&self) -> f64 {
-        (self.vol_24hr * self.last_price).ln()
+        (self.vol_24hr * self.get_last_price()).ln()
     }
 
     fn round_price(&self, price: f64) -> String {

@@ -59,7 +59,8 @@ impl Portfolio {
         let (amount, price) = self.get_pair(pair);
         let total_value = self.get_total_value();
 
-        let target = 1.0 / self.assets.len() as f64;
+        // Reserve additional 15% for USD
+        let target = 0.85 / self.assets.len() as f64;
 
         if amount == 0.0 || price == 0.0 {
             return 0.0;

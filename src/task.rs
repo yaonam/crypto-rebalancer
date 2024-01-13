@@ -32,6 +32,19 @@ pub async fn start(pair: String, portfolio: Arc<Mutex<Portfolio>>, token: String
     .to_string();
     send(&mut pub_sink, &message).await.unwrap();
 
+    // Sub to OHLC
+    let message = json!(
+    {
+        "event": "subscribe",
+        "pair": [pair],
+        "subscription": {
+            "name": "ohlc",
+            "interval": 1
+        }
+    })
+    .to_string();
+    send(&mut pub_sink, &message).await.unwrap();
+
     // Sub to open orders
     let message = json!(
     {

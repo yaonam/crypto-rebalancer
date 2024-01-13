@@ -14,10 +14,24 @@ pub struct TickerData {
     // o: Vec<serde_json::Value>,
 }
 
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct OHLCData {
+//     pub a: Vec<serde_json::Value>,
+//     pub b: Vec<serde_json::Value>,
+//     // c: Vec<serde_json::Value>,
+//     pub v: Vec<serde_json::Value>,
+//     // p: Vec<serde_json::Value>,
+//     // t: Vec<serde_json::Value>,
+//     // l: Vec<serde_json::Value>,
+//     // h: Vec<serde_json::Value>,
+//     // o: Vec<serde_json::Value>,
+// }
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum PublicData {
     Ticker(TickerData),
+    OHLC(Vec<serde_json::Value>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

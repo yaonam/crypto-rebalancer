@@ -65,7 +65,7 @@ impl Portfolio {
             return 0.0;
         }
 
-        (target - amount * price / total_value) * 100.0
+        (target - amount * price / total_value) / target * 50.0
     }
 
     fn get_asset_allocation(&self, asset: String) -> f64 {

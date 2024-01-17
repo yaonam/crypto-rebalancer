@@ -59,14 +59,13 @@ impl Portfolio {
         let (amount, price) = self.get_pair(pair);
         let total_value = self.get_total_value();
 
-        // Reserve additional 15% for USD
-        let target = 0.85 / self.assets.len() as f64;
+        let target = 1.0 / self.assets.len() as f64;
 
         if amount == 0.0 || price == 0.0 {
             return 0.0;
         }
 
-        (target - amount * price / total_value) / target * 50.0
+        (target - amount * price / total_value) / target * 100.0
     }
 
     fn get_asset_allocation(&self, asset: String) -> f64 {

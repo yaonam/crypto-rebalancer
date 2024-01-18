@@ -56,6 +56,13 @@ impl Portfolio {
 
     // value/total - target. In percentage.
     pub fn get_pair_target_delta(&self, pair: String) -> f64 {
+        // If any prices are 0, return 0.
+        for (_, price) in self.assets.values() {
+            if *price == 0.0 {
+                return 0.0;
+            }
+        }
+
         let (amount, price) = self.get_pair(pair);
         let total_value = self.get_total_value();
 

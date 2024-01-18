@@ -16,7 +16,7 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const BUFFER_SIZE: usize = 100; // Number of prices/spreads to keep in memory
 const PRICE_RECORD_INTERVAL: u64 = 10; // seconds
-const ORDER_SIZE_USD: f64 = 25.0;
+const ORDER_SIZE_USD: f64 = 30.0;
 const RISK_AVERSION: f64 = 15.0;
 const FEE: f64 = 0.0016;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0005;
@@ -267,6 +267,7 @@ impl Market {
                 send(&mut self.priv_sink, &buy_message).await.unwrap();
             }
         } else {
+            self.cancel_orders().await;
             return;
         }
         self.last_order_time = now;

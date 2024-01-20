@@ -48,5 +48,6 @@ async fn main() {
         _ = task_arb => (),
         _ = ctrl_c() => (), // Graceful shutdown
     };
+    println!("Exiting...");
     // let _ = tokio::join!(task1, task2);
 }

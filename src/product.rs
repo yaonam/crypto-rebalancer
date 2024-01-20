@@ -22,7 +22,7 @@ const FEE: f64 = 0.0016;
 const UPDATE_PRICE_THRESHOLD: f64 = 0.0005;
 const BASE_VOLATILITY: f64 = 0.0005;
 const ORDER_CREATION_COOLDOWN: u64 = 300; // seconds
-const DELTA_THRESHOLD: f64 = 5.0;
+const DELTA_THRESHOLD: f64 = 1.5;
 
 // Ratio for how much mid price updates
 const PRICE_UPDATE_NUMERATOR: f64 = 3.0;

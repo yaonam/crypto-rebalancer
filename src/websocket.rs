@@ -51,7 +51,7 @@ pub async fn listener(
         match message {
             Err(e) => {
                 println!("Error reading from stream: {}", e);
-                return;
+                // ignore
             }
             Ok(message) => {
                 market.lock().await.on_message(message.to_string()).await;
